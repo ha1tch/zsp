@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plus3 manual · plus3 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-yellow);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to plus3</a>
+<article class="doc-body">
+<h1 id="plus3-manual">plus3 manual</h1>
+<p>plus3 is a command-line tool for creating, managing, and extracting files from
++3DOS disk images (<code>.dsk</code>) as used by the ZX Spectrum +3. This manual documents
+every command and flag. For the library API see
+<a href="library-usage.html"><code>LIBRARY-USAGE.md</code></a>; for format details see
+<a href="plus3dos-pitfalls.html"><code>PLUS3DOS-PITFALLS.md</code></a>.</p>
+<h2 id="synopsis">Synopsis</h2>
+<pre><code>plus3 &lt;command&gt; [flags] [arguments]
+</code></pre>
+<p>Flags may appear before or after the positional arguments, so both
+<code>plus3 create disk.dsk --force</code> and <code>plus3 create --force disk.dsk</code> are accepted.</p>
+<p>Run <code>plus3 &lt;command&gt; -h</code> to see the flags for any command, <code>plus3 --help</code> for the
+command list, and <code>plus3 --version</code> for the version.</p>
+<p>Numbers for <code>--load-addr</code> and <code>--line</code> accept decimal (<code>32768</code>) or hexadecimal
+(<code>0x8000</code>).</p>
+<h2 id="commands">Commands</h2>
+<ul>
+<li><a href="#create"><code>create</code></a> - create a new blank disk image</li>
+<li><a href="#add"><code>add</code></a> - add a file to a disk image</li>
+<li><a href="#list"><code>list</code></a> - list the catalogue</li>
+<li><a href="#info"><code>info</code></a> - show disk usage and details</li>
+<li><a href="#extract"><code>extract</code></a> - extract a file to the host (or detokenise BASIC)</li>
+<li><a href="#delete"><code>delete</code></a> - delete a file</li>
+</ul>
+<hr />
+<h3 id="create">create</h3>
+<p>Create a new, blank +3DOS disk image in the standard single-sided +3 format
+(40 tracks, 9 sectors per track, 512-byte sectors, 1 KB blocks, 64-entry
+directory).</p>
+<pre><code>plus3 create [flags] &lt;disk.dsk&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--label &lt;text&gt;</code></td>
+<td>(none)</td>
+<td>Disk label, maximum 11 characters.</td>
+</tr>
+<tr>
+<td><code>--boot</code></td>
+<td>off</td>
+<td>Create a bootable disk rather than a plain data disk.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>off</td>
+<td>Overwrite the output file if it already exists.</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>off</td>
+<td>Suppress non-error output.</td>
+</tr>
+</tbody>
+</table>
+<p>Examples:</p>
+<pre><code>plus3 create game.dsk
+plus3 create game.dsk --label MYGAME --force
+</code></pre>
+<hr />
+<h3 id="add">add</h3>
+<p>Add a host file to a disk image, writing a correct PLUS3DOS header and managing
+block allocation and the directory.</p>
+<pre><code>plus3 add [flags] &lt;disk.dsk&gt; &lt;file&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t</code>, <code>--type &lt;type&gt;</code></td>
+<td><code>auto</code></td>
+<td>File type: <code>basic</code>, <code>basictext</code>, <code>code</code>, <code>screen</code>, <code>raw</code>, or <code>auto</code>.</td>
+</tr>
+<tr>
+<td><code>--load-addr &lt;n&gt;</code></td>
+<td><code>32768</code></td>
+<td>Load address for CODE files (decimal or <code>0x</code> hex).</td>
+</tr>
+<tr>
+<td><code>--line &lt;n&gt;</code></td>
+<td><code>10</code></td>
+<td>Auto-run line number for BASIC programs.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>off</td>
+<td>Overwrite an existing file of the same name.</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>off</td>
+<td>Suppress non-error output.</td>
+</tr>
+</tbody>
+</table>
+<p><code>-t</code> and <code>--type</code> are equivalent. With <code>auto</code>, the type is chosen from the host
+file's extension:</p>
+<table>
+<thead>
+<tr>
+<th>Extension</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.bas</code></td>
+<td>basic</td>
+</tr>
+<tr>
+<td><code>.bin</code></td>
+<td>code</td>
+</tr>
+<tr>
+<td><code>.scr</code></td>
+<td>screen</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td>raw</td>
+</tr>
+</tbody>
+</table>
+<p>Type notes:</p>
+<ul>
+<li><strong>code</strong> - a machine-code block. <code>--load-addr</code> sets the address it loads to.</li>
+<li><strong>basic</strong> - an <strong>already-tokenised</strong> BASIC program, stored verbatim. <code>--line</code>
+  sets the auto-run line (use a value of 32768 or above for no auto-run).</li>
+<li><strong>basictext</strong> - <strong>plain-text</strong> BASIC source, which is tokenised on import. Each
+  source line must begin with a line number, e.g.
+  <code>10 CLEAR 32767: LOAD "game"CODE: RANDOMIZE USR 32768</code>. The tokeniser covers
+  keywords, integer constants (0-65535), string literals, and REM comments;
+  keywords inside strings and after REM are left literal. It does not produce
+  floating-point literals, DEF FN calculator slots, or embedded colour-control
+  bytes, so for programs that rely on those, tokenise with a full toolchain and
+  add the result with <code>-t basic</code>.</li>
+<li><strong>screen</strong> - a SCREEN$ dump. The host file must be exactly 6912 bytes (6144
+  pixel bytes plus 768 attribute bytes); other sizes are rejected.</li>
+<li><strong>raw</strong> - the bytes are stored as-is.</li>
+</ul>
+<p>As a safeguard, <code>add</code> prints an advisory warning (to standard error, suppressed by
+<code>--quiet</code>) when the input looks like the wrong BASIC form for the chosen type: if
+<code>-t basictext</code> is given input that already parses as tokenised BASIC, or <code>-t basic</code>
+is given plain-text source. The operation still proceeds exactly as asked; the
+warning only flags a likely mistake.</p>
+<p>The on-disk name is derived from the host filename (8.3, upper-cased).</p>
+<p>Examples:</p>
+<pre><code>plus3 add game.dsk loader.bas -t basic     --line 10   # already tokenised
+plus3 add game.dsk loader.txt -t basictext --line 10   # plain-text source
+plus3 add game.dsk game.bin   -t code --load-addr 0x8000
+plus3 add game.dsk title.scr  -t screen
+plus3 add game.dsk data.dat   -t raw --force
+</code></pre>
+<hr />
+<h3 id="list">list</h3>
+<p>List the catalogue of files on a disk image.</p>
+<pre><code>plus3 list [flags] &lt;disk.dsk&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--sort &lt;key&gt;</code></td>
+<td><code>name</code></td>
+<td>Sort by <code>name</code>, <code>size</code>, or <code>type</code>.</td>
+</tr>
+<tr>
+<td><code>--reverse</code></td>
+<td>off</td>
+<td>Reverse the sort order.</td>
+</tr>
+<tr>
+<td><code>--format &lt;fmt&gt;</code></td>
+<td><code>dos</code></td>
+<td>Output style: <code>dos</code>, <code>ls</code>, or <code>cpm</code>.</td>
+</tr>
+<tr>
+<td><code>--pattern &lt;glob&gt;</code></td>
+<td><code>*</code></td>
+<td>Show only names matching the pattern, e.g. <code>*.BAS</code>.</td>
+</tr>
+<tr>
+<td><code>--long</code></td>
+<td>off</td>
+<td>Show detailed per-file information.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>off</td>
+<td>Output as JSON.</td>
+</tr>
+<tr>
+<td><code>--show-deleted</code></td>
+<td>off</td>
+<td>Include deleted files in the listing.</td>
+</tr>
+<tr>
+<td><code>--show-system</code></td>
+<td>off</td>
+<td>Include system files in the listing.</td>
+</tr>
+</tbody>
+</table>
+<p>Examples:</p>
+<pre><code>plus3 list game.dsk
+plus3 list game.dsk --sort size --reverse
+plus3 list game.dsk --pattern '*.BAS' --long
+plus3 list game.dsk --json
+</code></pre>
+<hr />
+<h3 id="info">info</h3>
+<p>Show summary information about a disk image: file count, space used and free, and
+format details.</p>
+<pre><code>plus3 info [flags] &lt;disk.dsk&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--validate</code></td>
+<td>on</td>
+<td>Run a structural validation of the image.</td>
+</tr>
+<tr>
+<td><code>--verbose</code></td>
+<td>off</td>
+<td>Show additional details.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>off</td>
+<td>Output as JSON.</td>
+</tr>
+<tr>
+<td><code>--show-deleted</code></td>
+<td>off</td>
+<td>Include information about deleted files.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--validate</code> is on by default; the check is a structural sanity check on the image,
+not a guarantee that a real +3 will accept every file.</p>
+<p>Examples:</p>
+<pre><code>plus3 info game.dsk
+plus3 info game.dsk --verbose
+plus3 info game.dsk --json
+</code></pre>
+<hr />
+<h3 id="extract">extract</h3>
+<p>Extract a file from a disk image back to the host, or detokenise a BASIC program
+to readable text.</p>
+<pre><code>plus3 extract [flags] &lt;disk.dsk&gt; &lt;name&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-o</code>, <code>--output-dir &lt;dir&gt;</code></td>
+<td>(current dir)</td>
+<td>Directory to write the extracted file into.</td>
+</tr>
+<tr>
+<td><code>--strip-header</code></td>
+<td>off</td>
+<td>Remove the 128-byte PLUS3DOS header, leaving just the data.</td>
+</tr>
+<tr>
+<td><code>--overwrite</code></td>
+<td>off</td>
+<td>Allow overwriting an existing host file.</td>
+</tr>
+<tr>
+<td><code>--basic</code></td>
+<td>off</td>
+<td>Detokenise a BASIC program to text instead of extracting raw bytes.</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>off</td>
+<td>Suppress non-error output.</td>
+</tr>
+</tbody>
+</table>
+<p><code>-o</code> and <code>--output-dir</code> are equivalent and name a <strong>directory</strong> (it is created if
+needed); the output filename is taken from the disk file's name. Extraction uses
+the PLUS3DOS header's length field, so it is byte-exact rather than rounded to the
+record size.</p>
+<p>With <code>--basic</code>, the program is detokenised to readable text. Without <code>-o</code> the text
+goes to standard output; with <code>-o &lt;dir&gt;</code> it is written to <code>&lt;name&gt;.txt</code> in that
+directory.</p>
+<p>If a file whose header marks it as a tokenised BASIC program is extracted without
+<code>--basic</code>, <code>extract</code> prints an advisory warning (suppressed by <code>--quiet</code>)
+suggesting <code>--basic</code>. The extraction still proceeds as asked.</p>
+<p>Examples:</p>
+<pre><code>plus3 extract game.dsk GAME.BIN -o outdir
+plus3 extract game.dsk GAME.BIN -o outdir --strip-header
+plus3 extract game.dsk LOADER.BAS --basic
+plus3 extract game.dsk LOADER.BAS --basic -o outdir
+</code></pre>
+<hr />
+<h3 id="delete">delete</h3>
+<p>Delete a file from a disk image, freeing its blocks.</p>
+<pre><code>plus3 delete [flags] &lt;disk.dsk&gt; &lt;name&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--force</code></td>
+<td>off</td>
+<td>Delete without asking for confirmation.</td>
+</tr>
+<tr>
+<td><code>--no-recycle</code></td>
+<td>off</td>
+<td>Do not preserve the deleted file's directory information.</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>off</td>
+<td>Suppress non-error output.</td>
+</tr>
+</tbody>
+</table>
+<p>Examples:</p>
+<pre><code>plus3 delete game.dsk GAME.BIN --force
+</code></pre>
+<hr />
+<h2 id="exit-status">Exit status</h2>
+<p>plus3 returns a non-zero exit status and prints an <code>Error:</code> message to standard
+error when a command fails (for example, a missing disk image, a wrong-sized
+screen file, or an existing output file without <code>--force</code> / <code>--overwrite</code>). On
+success it returns zero.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

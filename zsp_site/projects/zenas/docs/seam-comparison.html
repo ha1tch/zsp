@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reproducing the seam on other assemblers · zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenas</a>
+<article class="doc-body">
+<h1 id="reproducing-the-seam-on-other-assemblers">Reproducing the seam on other assemblers</h1>
+<p>The <a href="zenas-design.html">design rationale</a> describes the seam: a typed
+linkage layer — width-checked signatures, calls, assignment, namespaced
+packages — built natively into the assembler. A fair question is how hard it
+would be to obtain the same thing elsewhere. This table records an assessment.</p>
+<p>The purpose is calibration, not competition. Each assembler below is a
+well-regarded tool with its own design goals, and none of them set out to
+provide a typed linkage layer — the scores measure distance from a goal that
+is zenas's, not theirs. They serve here as parameters of reference: they
+locate the seam in the design space and show which of its parts existing
+facilities can approximate and which parts genuinely require assembler
+support.</p>
+<h2 id="what-is-being-scored">What is being scored</h2>
+<p>"The same" decomposes into four components of unequal difficulty:</p>
+<ol>
+<li><strong>Seam semantics</strong> — typed signatures with width checking, calls,
+   assignment.</li>
+<li><strong>Namespaced packages</strong> with qualified calls and bare-unless-ambiguous
+   resolution.</li>
+<li><strong>C-flavoured surface syntax.</strong></li>
+<li><strong>Verification apparatus</strong> — integrated run/assert, with test constructs
+   legal only in test files.</li>
+</ol>
+<p>Components 3 and 4 are roughly equally out of reach everywhere: the syntax
+requires an external transpiler on any conventional assembler, and no
+mainstream assembler executes its own output, so assertions mean external
+emulator wiring. The scores below are therefore dominated by components 1
+and 2: how far each assembler's native facilities go towards a checked,
+namespaced linkage layer.</p>
+<p><strong>Scale:</strong> 1 = the capability is native; 10 = nearly everything must be
+built outside the tool. Scores assume a competent user exploiting the assembler's full macro
+and scripting facilities, without modifying the assembler itself.</p>
+<h2 id="the-table">The table</h2>
+<table>
+<thead>
+<tr>
+<th>Assembler</th>
+<th style="text-align: right;">Difficulty</th>
+<th>What helps</th>
+<th>What blocks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>zenas</strong></td>
+<td style="text-align: right;"><strong>1.0</strong></td>
+<td>The seam is native: <code>.MACRO_STYLE C</code> width-checked signatures, <code>.PACKAGE</code> namespacing, <code>zenas assert</code> with <code>.EXPECT</code>/<code>.MATCH</code> confined to <code>*_test.asm</code></td>
+<td>Nothing structural; the remaining cost is adopting the layering discipline</td>
+</tr>
+<tr>
+<td>sjasmplus</td>
+<td style="text-align: right;">4.0</td>
+<td>Embedded Lua scripting (arbitrary compile-time checks, metadata tables), <code>MODULE</code> namespacing, strong macros</td>
+<td>Width/return checking must be hand-built in Lua; calls stay macro-shaped; no test/production file separation</td>
+</tr>
+<tr>
+<td>ca65 (cc65) — <em>6502, comparator only</em></td>
+<td style="text-align: right;">4.5</td>
+<td>Real scopes, <code>.assert</code>, rich macro language, linker segments</td>
+<td>No scripting layer, so per-function type metadata is laborious; wrong CPU for a Z80 project</td>
+</tr>
+<tr>
+<td>z88dk z80asm</td>
+<td style="text-align: right;">5.0</td>
+<td>A genuine linker: modules and libraries make package-swapping ordinary relinking</td>
+<td>Weak macro system; no mechanism for width checking — type information has nowhere to live</td>
+</tr>
+<tr>
+<td>Macroassembler AS (asl)</td>
+<td style="text-align: right;">5.5</td>
+<td>Very capable macro language, <code>SECTION</code> scoping, string/symbol manipulation, <code>ERROR</code> directive</td>
+<td>Tracking per-function signatures across macros is possible but tortured; no namespaced call resolution</td>
+</tr>
+<tr>
+<td>RASM</td>
+<td style="text-align: right;">5.5</td>
+<td>Powerful expression and loop directives, module-prefixed labels, assertion support</td>
+<td>No scripting; type metadata exists only by convention</td>
+</tr>
+<tr>
+<td>Glass</td>
+<td style="text-align: right;">6.0</td>
+<td>Proper lexical scoping (<code>PROC</code>, sections), clean design</td>
+<td>Small macro system; assertion vocabulary too thin for width contracts</td>
+</tr>
+<tr>
+<td>WLA-DX</td>
+<td style="text-align: right;">6.5</td>
+<td>Sections, <code>.ENUM</code>/<code>.STRUCT</code>, multi-platform linker</td>
+<td>Macro language too weak for signature checking; namespacing is prefix discipline</td>
+</tr>
+<tr>
+<td>vasm</td>
+<td style="text-align: right;">6.5</td>
+<td>Solid conventional macros, multiple syntax front-ends</td>
+<td>Nothing resembling scoped packages or compile-time metadata</td>
+</tr>
+<tr>
+<td>zmac / tniASM</td>
+<td style="text-align: right;">8.0</td>
+<td>Competent classical assemblers</td>
+<td>Classical macros only; every seam component would be an external preprocessor</td>
+</tr>
+<tr>
+<td>pasmo</td>
+<td style="text-align: right;">8.5</td>
+<td>Clean, predictable, good <code>EQU</code>/<code>IF</code></td>
+<td>Minimal macros, flat namespace, no assertions — the seam would be almost entirely external tooling</td>
+</tr>
+</tbody>
+</table>
+<h2 id="reading-the-table">Reading the table</h2>
+<p>Three observations the scores compress:</p>
+<ul>
+<li><strong>sjasmplus at 4.0 is the nearest reference point</strong>, and the reason is
+  instructive: Lua is a general-purpose escape hatch. Reaching the seam there
+  means embedding a scripting language — which is precisely the class of
+  dependency the seam exists to avoid. The score is low because sjasmplus is
+  powerful, and the gap remains because that power is of a different kind.</li>
+<li><strong>z88dk's score hides an asymmetry.</strong> The package-swap half of the
+  architecture is cheap there (it is ordinary linking), while the typed
+  interface half is nearly impossible. The seam's distinguishing element is
+  the <em>checked contract</em>, not the modularity.</li>
+<li><strong>No score covers the verification apparatus.</strong> Test-only directive
+  enforcement and the integrated assemble–run–assert loop require changes to
+  the assembler itself; on every tool above, the honest difficulty for the
+  full apparatus is "fork it or rewrite it".</li>
+</ul>
+<h2 id="macro-engine-and-table-driven-assemblers">Macro-engine and table-driven assemblers</h2>
+<p>A separate class deserves its own section, because these tools differ from the
+conventional assemblers above in kind, not merely in degree: they treat the
+instruction set itself as user-definable. That makes them the most instructive
+reference points of all, and the scores need more context than a table row can
+carry.</p>
+<table>
+<thead>
+<tr>
+<th>Assembler</th>
+<th style="text-align: right;">Difficulty</th>
+<th>What helps</th>
+<th>What blocks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>fasmg</td>
+<td style="text-align: right;">3.5</td>
+<td>The assembler <em>is</em> a macro engine with no built-in instruction set; <code>namespace</code> blocks; <code>calminstruction</code> compiled macros able to attach metadata to symbols; user-defined <code>err</code> diagnostics, so a violated contract can fail assembly with a sensible message. Community Z80 include packs exist (e.g. jacobly0/fasmg-z80)</td>
+<td>The seam would be a small compiler written in fasmg's macro language, and the instruction pack is itself a dependency to adopt or maintain before seam work starts; no execution of output</td>
+</tr>
+<tr>
+<td>Retro Assembler</td>
+<td style="text-align: right;">6.0</td>
+<td>Modern ergonomics: parameterised macros with default values, <code>Loop</code>/<code>If</code>/<code>While</code> directives, multi-CPU targets, editor integration</td>
+<td>Facilities are classical in kind beneath the ergonomics; no signature metadata, no package-style namespacing</td>
+</tr>
+<tr>
+<td>customasm</td>
+<td style="text-align: right;">6.0</td>
+<td>Declarative ISA definition (<code>#ruledef</code>/<code>#subruledef</code>) with <strong>typed, bit-width-checked operand parameters</strong> (<code>{value: i8}</code>), <code>assert()</code> guards with custom messages, <code>#fn</code> expression functions, <code>#assert</code>, conditional compilation</td>
+<td>The typing lives at the operand level, not the call level: there is no function or call abstraction for code, no namespacing, and no macro system (users resort to an external C preprocessor). Z80's parenthesised indirect operands — <code>(HL)</code>, <code>(IX+d)</code> — sit close to a known ambiguity in its pattern parser</td>
+</tr>
+</tbody>
+</table>
+<p>The score assigned to fasmg carries an assumption worth stating: it presumes a
+usable community Z80 instruction pack. Where one must be written or
+substantially maintained, the effective difficulty rises by a point or more.</p>
+<h3 id="what-this-class-teaches">What this class teaches</h3>
+<p>These tools are worth studying rather than merely scoring, for three reasons.</p>
+<p><strong>fasmg shows the seam's dependency question from a third angle.</strong> sjasmplus
+reaches seam territory by <em>embedding</em> a language (Lua); fasmg reaches it by
+<em>being</em> one — its macro system is powerful enough to define entire instruction
+sets, so it is certainly powerful enough to implement width-checked linkage.
+But in both cases the dependency the seam avoids does not disappear; it
+changes address. zenas's position is that the linkage layer should be a fixed,
+specified part of the assembler, not a program written in it — smaller,
+less expressive, and therefore stable.</p>
+<p><strong>customasm shows that typed, checked encoding is natural at the ISA layer.</strong>
+Its operand parameters are declared with bit widths and validated with
+assertion guards — the same idea as the seam's width checking, applied one
+layer down, at the boundary between mnemonic and encoding rather than between
+caller and routine. That the idea appears independently at both layers is
+mild evidence it is a good one. Its instruction-set-as-data approach is also
+the logical extreme of retargetability, and a useful reference for any future
+work on additional instruction-set tiers.</p>
+<p><strong>The class shares one absence with everything else in this document.</strong> None
+of these tools executes its own output. However far their definitional power
+extends, the verification apparatus — run, assert, test-file discipline —
+remains outside their design space, which is a useful reminder of which parts
+of zenas are reproducible elsewhere with effort and which parts are not.</p>
+<p>A brief note on a neighbouring current: modernised classical assemblers such
+as Nestor80 (a MACRO-80-compatible assembler and linker with module
+namespacing and modern string handling) show that the Z80 tooling world is
+actively renovating its traditional lineage too. These belong with the
+conventional class above — roughly z88dk territory on this table's scale —
+but they indicate that module-style namespacing, at least, is becoming an
+expected amenity.</p>
+<h2 id="confidence">Confidence</h2>
+<p>Scores for sjasmplus, pasmo, z88dk, and ca65 rest on detailed familiarity.
+Scores for RASM and Glass are assessed from their documented feature sets and
+could move by roughly half a point on closer inspection. The macro-engine
+section's entries were checked against current project documentation and
+repositories at the time of writing: the existence of community fasmg Z80
+include files, customasm's typed rule parameters and assertion guards, and
+Retro Assembler's directive set are verified; fasmg's score additionally
+assumes a maintained instruction pack, as noted above. The table is a
+considered estimate, not a measurement; corrections grounded in the
+respective manuals are the appropriate way to revise it.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

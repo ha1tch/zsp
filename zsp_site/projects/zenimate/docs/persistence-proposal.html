@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Persistence for zenimate via zentools · zenimate — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-cyan);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenimate</a>
+<article class="doc-body">
+<h1 id="persistence-for-zenimate-via-zentools">Persistence for zenimate via zentools</h1>
+<h2 id="summary">Summary</h2>
+<p>zenimate currently keeps everything in memory: the <code>Sprite</code> model has no save,
+load, or export path of any kind. This document proposes how to add persistence
+of several kinds, reusing <code>github.com/ha1tch/zentools</code> for the ZX-format exports
+rather than hand-rolling tape and snapshot encoders.</p>
+<p>Two important findings shaped this proposal, both worth stating up front:</p>
+<ol>
+<li>
+<p><strong>There is no <code>pkg/scr</code> in the published zentools.</strong> The current public repo
+   (<code>github.com/ha1tch/zentools</code>) is at <strong>v0.4.1</strong>, with a single <code>main</code> branch
+   and tags up to v0.4.1. It contains <code>pkg/tap</code>, <code>pkg/tzx</code>, <code>pkg/snapshot</code>,
+   <code>pkg/basic</code>, and <code>pkg/build</code> — but no screen/SCR package and no ZCUT format.
+   The <code>pkg/scr</code> / <code>zx scr</code> / ZCUT work exists in our own project notes as a
+   0.5.0 milestone, but it has not been pushed to the public repository, so it is
+   not reachable here. This proposal therefore builds on the v0.4.1 surface that
+   actually exists. Where <code>pkg/scr</code> would help, that is called out as a future
+   integration point rather than assumed.</p>
+</li>
+<li>
+<p><strong>zenimate's art is sprites, not full screens.</strong> A <code>Sprite</code> is up to 32x24
+   character cells (256x192 px maximum, i.e. a full screen at the top end, but
+   usually much smaller), multi-frame, with one ZX attribute byte per 8x8 cell
+   per frame. A ZX <code>.scr</code> screen file is always a fixed 6912 bytes for the whole
+   256x192 display. The two are not the same shape, and the mapping between them
+   is the interesting part of the design.</p>
+</li>
+</ol>
+<h2 id="what-zentools-v041-actually-provides">What zentools v0.4.1 actually provides</h2>
+<p>Relevant package surface, verified against the cloned source:</p>
+<h3 id="pkgtap"><code>pkg/tap</code></h3>
+<ul>
+<li><code>EncodeCode(name string, data []byte, loadAddress uint16) []byte</code> — wraps raw
+  bytes as a CODE tape block (header + data). This is the in-memory entry point:
+  bytes in hand, TAP image out.</li>
+<li><code>EncodeProgram(name string, data []byte, autostart uint16) []byte</code> — a BASIC
+  program block.</li>
+<li><code>Decode(image []byte) ([]Block, error)</code> — parse a TAP back into blocks.</li>
+</ul>
+<h3 id="pkgtzx"><code>pkg/tzx</code></h3>
+<ul>
+<li><code>EncodeFromTAP(tap []byte, opts EncodeOptions) ([]byte, error)</code> — wrap a TAP
+  image as TZX (with optional title/author/year metadata).</li>
+</ul>
+<h3 id="pkgsnapshot"><code>pkg/snapshot</code></h3>
+<ul>
+<li><code>EncodeSNA</code> / <code>EncodeSNA128</code>, <code>EncodeZ80</code> / <code>EncodeZ80v3</code>, plus the matching
+  <code>Decode*</code> functions, operating on a <code>MachineState</code> (CPU, paging, memory banks).</li>
+</ul>
+<h3 id="pkgbuild-the-high-level-convenience-layer"><code>pkg/build</code> — the high-level convenience layer</h3>
+<ul>
+<li><code>Request{ Name, Code []byte, Origin uint16, Start, SP uint16, Model }</code>.</li>
+<li><code>EncodeTAP(r)</code> / <code>EncodeTZX(r)</code> — tape images of the code.</li>
+<li><code>EncodeTAPWithLoader(r)</code> — a tape that auto-runs: a tokenised BASIC loader
+  (<code>CLEAR</code>/<code>LOAD ""CODE</code>/<code>RANDOMIZE USR</code>) precedes the CODE block.</li>
+<li><code>EncodeSNA(r)</code> / <code>EncodeZ80(r)</code> — overlay the code onto a model's boot state at
+  <code>Origin</code> and set PC/SP, producing a snapshot that runs the program on load.</li>
+</ul>
+<p>The crucial mechanism for art persistence is <code>build</code>'s memory overlay: code is
+written into RAM at <code>Origin</code>, mapped to the correct bank. The Spectrum display
+file lives at <strong>0x4000-0x57FF</strong> (6144 bytes of bitmap) followed by
+<strong>0x5800-0x5AFF</strong> (768 bytes of attributes) — 6912 bytes total. So writing a
+6912-byte screen image at <code>Origin = 0x4000</code> lands it exactly on the display,
+which means a snapshot built that way <strong>boots showing the artwork</strong>.</p>
+<h2 id="zenimates-model-precisely">zenimate's model, precisely</h2>
+<pre><code>Sprite{
+  width, height int          // pixels, each a multiple of 8, up to 256x192
+  frames        []Frame      // Frame = []bool, row-major, len = width*height
+  frameAttrs    [][]byte     // one attr byte per 8x8 cell, per frame
+  attrCols, attrRows int     // width/8, height/8
+  name          string
+  selected      int
+}
+</code></pre>
+<p>So the data to persist per project is: dimensions, a frame count, and for each
+frame a pixel bitmap plus an attribute map. Nothing currently serialises this.</p>
+<h2 id="proposal-three-tiers-of-persistence">Proposal: three tiers of persistence</h2>
+<h3 id="tier-1-native-project-format-the-source-of-truth">Tier 1 — Native project format (the source of truth)</h3>
+<p>A lossless, round-trippable on-disk format for a whole zenimate project:
+dimensions, all frames, all attributes, the name, and the selected frame. This is
+what File &gt; Save / Open operates on, and it is the only format that preserves
+everything zenimate knows.</p>
+<p>Recommendation: a small, explicit binary container (call it <code>.zspr</code>, "zen
+sprite") with a versioned header, rather than JSON. Per working conventions the
+default would be a simple, documented byte layout:</p>
+<pre><code>magic    &quot;ZSPR&quot;            4 bytes
+version  uint8             1
+flags    uint8             1   (reserved: e.g. bit0 = attrs present)
+wCells   uint8             1   (1..32)
+hCells   uint8             1   (1..24)
+frames   uint8             1   (1..16)
+selected uint8             1
+nameLen  uint8 + name      1 + n
+per frame:
+  bitmap   ceil(w*h/8) bytes   (packed MSB-first, row-major)
+  attrs    wCells*hCells bytes (one ZX attr byte per cell)
+</code></pre>
+<p>This is trivial to encode/decode in <code>internal/model</code>, has no external
+dependencies, and is forward-versioned. It is independent of zentools — zentools
+is for <em>export</em>, not for the native format.</p>
+<p>A JSON variant is possible if human-readability or web interop matters, but for a
+pixel editor a compact binary file is the better default; we can add a
+<code>--format json</code> export later if needed.</p>
+<h3 id="tier-2-zx-screen-export-via-zentools-the-make-it-real-path">Tier 2 — ZX screen export via zentools (the "make it real" path)</h3>
+<p>This is where zentools earns its place. The art becomes something a real
+Spectrum (or any emulator) can load. The bridge is: <strong>render the sprite into a
+6912-byte screen image, then hand it to <code>pkg/build</code>.</strong></p>
+<p>Pipeline:</p>
+<ol>
+<li>
+<p><strong>Compose a screen buffer.</strong> Build a <code>[6912]byte</code> ZX display image from a
+   chosen frame:
+   - The bitmap third: for each set pixel, set the corresponding bit in the
+     0x4000 region using the Spectrum's interleaved line address arithmetic
+     (the y-coordinate bit-scramble; not linear). zenimate already knows the
+     pixel grid, so this is a coordinate mapping plus bit packing.
+   - The attribute third: copy the frame's <code>attrCols*attrRows</code> attribute bytes
+     into the 0x5800 region at the matching cell positions.
+   - A sprite smaller than 256x192 is placed at a chosen origin cell (default
+     top-left, or centred), with the rest of the screen left as a configurable
+     PAPER fill so it is a valid full screen.</p>
+</li>
+<li>
+<p><strong>Wrap with zentools.</strong> Given the 6912-byte buffer <code>scr</code>:
+   - <strong>Raw <code>.scr</code></strong> — just write the 6912 bytes. No zentools needed; this is the
+     universal interchange format every emulator and tool reads.
+   - <strong><code>.tap</code></strong> — <code>build.EncodeTAP(build.Request{ Name, Code: scr, Origin: 0x4000 })</code>.
+     Loads with <code>LOAD "" CODE 16384</code>.
+   - <strong>Auto-running <code>.tap</code></strong> — <code>build.EncodeTAPWithLoader(...)</code> so <code>LOAD ""</code>
+     shows the picture immediately (loader CLEARs, loads CODE at 0x4000, and we
+     point USR at a tiny "halt" or at a return to BASIC; for a static screen the
+     loader can simply load and stop).
+   - <strong><code>.tzx</code></strong> — <code>build.EncodeTZX(req)</code> or <code>EncodeTZXFromTAP</code>, with title/author
+     metadata (handy for archival; per conventions, use neutral placeholders, no
+     personal identifiers baked into shared artwork).
+   - <strong><code>.sna</code> / <code>.z80</code> snapshot</strong> — <code>build.EncodeSNA(req)</code> / <code>EncodeZ80(req)</code>
+     with <code>Origin: 0x4000</code>. Because the overlay writes the screen straight into
+     the display file of a booted machine state, the snapshot <strong>opens already
+     showing the art</strong>. This is the most satisfying "share" format: one file, and
+     the emulator displays the picture with no loading.</p>
+</li>
+</ol>
+<p>All five outputs come from the <em>same</em> 6912-byte composition step; only the final
+wrap differs. That keeps the screen-composer (ours) cleanly separated from the
+container encoders (zentools).</p>
+<h3 id="tier-3-animation-export-multi-frame">Tier 3 — Animation export (multi-frame)</h3>
+<p>zenimate's sprites are animated, which a single <code>.scr</code> cannot express. Options,
+in increasing ambition:</p>
+<ul>
+<li><strong>Frame sequence of screens.</strong> Export each frame as its own <code>.scr</code> (or a
+  numbered set), and/or a multi-block <code>.tap</code> with one CODE block per frame at
+  0x4000. A trivial BASIC driver (tokenised via <code>pkg/basic</code>, assembled via
+  <code>pkg/build</code>'s loader machinery) can <code>LOAD</code> and flip frames on a timer. This is
+  entirely expressible with the v0.4.1 surface.</li>
+<li><strong>Sprite-data export (not screen export).</strong> For game use, the more valuable
+  artifact is the <em>sprite</em> as raw graphic data (masked or unmasked, the format
+  KnightQuest / the ChibiAkumas-style engines consume), not a full screen. That
+  is a packed bitmap+mask blob at an arbitrary <code>Origin</code>, wrapped as a CODE
+  <code>.tap</code>/snapshot exactly as in Tier 2 but without the screen-address scramble.
+  This connects zenimate to the rest of the ZX Opal toolchain (zenas, zenzx,
+  KnightQuest) and is probably the highest-value export for actual game work.</li>
+</ul>
+<h2 id="where-pkgscr-when-published-slots-in">Where <code>pkg/scr</code> (when published) slots in</h2>
+<p>If/when the 0.5.0 <code>pkg/scr</code> + ZCUT work is pushed, it would replace the
+hand-written screen-composition step in Tier 2: the y-scramble bit addressing,
+the attribute placement, and likely the ZCUT "cut/paste a sub-rectangle of a
+screen" semantics are exactly what a sprite-to-screen blitter needs. The clean
+seam in this design — <em>compose 6912 bytes here, wrap with <code>pkg/build</code> there</em> —
+means adopting <code>pkg/scr</code> later is a drop-in for the composer and changes nothing
+about the export wrappers. Until then, the screen-composition arithmetic lives in
+zenimate (a ~50-line, well-understood, testable function).</p>
+<h2 id="recommended-build-order">Recommended build order</h2>
+<ol>
+<li><strong>Tier 1 native <code>.zspr</code></strong> in <code>internal/model</code> (save/load, fully round-trip
+   tested). This is the foundation and has no external dependency.</li>
+<li><strong>Tier 2 raw <code>.scr</code> export</strong> — the screen composer plus a plain 6912-byte
+   writer. Testable purely by inspecting bytes (set a pixel, assert the right bit
+   at the right scrambled address).</li>
+<li><strong>Tier 2 zentools wraps</strong> — add <code>zentools</code> as a dependency and expose
+   <code>.tap</code> / <code>.tzx</code> / <code>.sna</code> / <code>.z80</code> from the same composer. Per toolchain
+   policy this pulls zentools at its tagged version into <code>go.mod</code>.</li>
+<li><strong>Tier 3</strong> as a later, separable step once single-frame export is solid.</li>
+</ol>
+<h2 id="dependency-and-policy-notes">Dependency and policy notes</h2>
+<ul>
+<li>Adding zentools means <code>require github.com/ha1tch/zentools vX.Y.Z</code> in
+  <code>go.mod</code>; it is one of our own namespace projects, both already on <code>go 1.25</code>.</li>
+<li>The screen composer must use <strong>neutral placeholders</strong> for any embedded names
+  (TZX title/author), never personal identifiers, in any shareable artifact.</li>
+<li>The composer and the wrappers stay in separate files so the zentools dependency
+  is confined to the export layer and the native format stays dependency-free.</li>
+</ul>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

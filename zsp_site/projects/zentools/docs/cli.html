@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zentools command-line tools · zentools — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-blue);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zentools</a>
+<article class="doc-body">
+<h1 id="zentools-command-line-tools">zentools command-line tools</h1>
+<p>This manual documents every zentools command in detail: the focused drop-in
+tools (<code>maketap</code>, <code>totap</code>, <code>loadtap</code>, <code>tap2tzx</code>) and the unified <code>zx</code> front-end.
+It also explains, at length, what each conversion does and what it costs, since
+the formats involved carry different kinds of information and not every
+conversion is lossless.</p>
+<p>For the programmatic interface behind these tools, see the
+<a href="library.html">library manual</a>.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#concepts-tapes-and-snapshots">Concepts: tapes and snapshots</a></li>
+<li><a href="#maketap">maketap</a></li>
+<li><a href="#totap">totap</a></li>
+<li><a href="#loadtap">loadtap</a></li>
+<li><a href="#tap2tzx">tap2tzx</a></li>
+<li><a href="#zx">zx</a></li>
+<li><a href="#zx-tap">zx tap</a></li>
+<li><a href="#zx-tzx">zx tzx</a></li>
+<li><a href="#zx-basic">zx basic</a></li>
+<li><a href="#zx-snap">zx snap</a></li>
+<li><a href="#zx-convert">zx convert</a></li>
+<li><a href="#zx-info">zx info</a></li>
+<li><a href="#conversions-in-depth">Conversions in depth</a></li>
+</ul>
+<h2 id="concepts-tapes-and-snapshots">Concepts: tapes and snapshots</h2>
+<p>Two kinds of file format run through everything below, and the difference
+between them governs which conversions are possible.</p>
+<p>A <strong>tape</strong> (TAP or TZX) is an ordered sequence of named blocks. Each block is
+either a header — carrying a name, a type, and a load address — or the data that
+follows it. A tape describes <em>what to load and where</em>, but it holds no record of
+a running machine: no register values, no program counter, no notion of where
+execution should begin. TZX is the richer of the two: in addition to the data
+blocks a TAP would hold, it can carry archive metadata, hardware-requirement
+information, grouping, and timing detail.</p>
+<p>A <strong>snapshot</strong> (SNA or Z80) is the opposite: a frozen photograph of a whole
+machine at one instant. It records the full contents of RAM, every processor
+register, the interrupt state, and — on 128K machines — the paging
+configuration. It has no block structure and no names; it is simply the machine,
+exactly as it stood.</p>
+<p>Because a tape and a snapshot describe different things, converting between the
+two kinds is never a clean copy. A tape lacks the entry point a snapshot needs;
+a snapshot lacks the block structure and names a tape uses. Conversions <em>within</em>
+a kind (tape to tape, snapshot to snapshot) are clean; conversions <em>across</em> the
+divide are addressed carefully in <a href="#conversions-in-depth">Conversions in depth</a>.</p>
+<h2 id="maketap">maketap</h2>
+<p>Creates a TAP file from a binary, stored as a single CODE block.</p>
+<pre><code>maketap [--name NAME] [--address ADDR] input.bin output.tap
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--name</code></td>
+<td>input filename</td>
+<td>Block name, up to ten characters.</td>
+</tr>
+<tr>
+<td><code>--address</code></td>
+<td>32768</td>
+<td>Load address for the CODE block.</td>
+</tr>
+</tbody>
+</table>
+<p>Both positional arguments are required: the input binary and the output tape.</p>
+<p>Example — wrap a binary that loads at 0x8000 and name the block <code>game</code>:</p>
+<pre><code>maketap --name game --address 32768 game.bin game.tap
+</code></pre>
+<p>The resulting tape holds one header block and one data block. The CODE header
+records the standard parameter value of 0x8000 in its second parameter field;
+this is a correction over the older zxgotools tool, which wrote zero there.</p>
+<h2 id="totap">totap</h2>
+<p>Converts either a binary or a BASIC text file into a TAP file.</p>
+<pre><code>totap --binary [--name NAME] [--address ADDR] input.bin output.tap
+totap --basic  [--name NAME] [--autostart LINE] [-c] input.bas output.tap
+</code></pre>
+<p>Exactly one of <code>--binary</code> or <code>--basic</code> must be given; supplying both, or
+neither, is an error.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--binary</code></td>
+<td>off</td>
+<td>Treat the input as a raw binary (a CODE block).</td>
+</tr>
+<tr>
+<td><code>--basic</code></td>
+<td>off</td>
+<td>Treat the input as BASIC source text.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td>input filename</td>
+<td>Block name, up to ten characters.</td>
+</tr>
+<tr>
+<td><code>--address</code></td>
+<td>32768</td>
+<td>Load address (binary mode only).</td>
+</tr>
+<tr>
+<td><code>--autostart</code></td>
+<td>0</td>
+<td>Auto-run line number (BASIC mode only).</td>
+</tr>
+<tr>
+<td><code>-c</code></td>
+<td>off</td>
+<td>Case-independent keyword matching (BASIC mode only).</td>
+</tr>
+</tbody>
+</table>
+<p>In binary mode, <code>totap</code> behaves like <code>maketap</code>. In BASIC mode it tokenises the
+source into the Spectrum's internal byte format and writes a Program block. The
+<code>--autostart</code> line, if non-zero, makes the program run automatically on load.</p>
+<p>By default, keyword matching in BASIC mode is case-<em>sensitive</em>: <code>PRINT</code>
+tokenises but <code>print</code> is kept as literal text. Passing <code>-c</code> makes matching
+case-independent, so <code>print</code> also tokenises. This preserves the observable
+behaviour of the older tool's <code>-c</code> flag.</p>
+<p>If the tokenised program uses a 128K-only keyword (<code>SPECTRUM</code> or <code>PLAY</code>), a note
+is printed to remind you the program will not run on a 48K machine.</p>
+<p>Example — tokenise an auto-running loader:</p>
+<pre><code>totap --basic --name loader --autostart 10 loader.bas loader.tap
+</code></pre>
+<h2 id="loadtap">loadtap</h2>
+<p>Reads a TAP file and reports its structure.</p>
+<pre><code>loadtap [-d] [-r] input.tap
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-d</code></td>
+<td>Also dump each block's data as hexadecimal.</td>
+</tr>
+<tr>
+<td><code>-r</code></td>
+<td>Write the raw data-block bytes to standard output (no headers).</td>
+</tr>
+</tbody>
+</table>
+<p>With no flags, <code>loadtap</code> prints a summary: the number of blocks, then for each
+block its length, flag byte, header fields (type, filename, data length, and the
+two parameters) where present, checksum, and data length.</p>
+<p><code>-d</code> appends a hex dump of every block's data, sixteen bytes per line.</p>
+<p><code>-r</code> is different in kind: instead of a report it writes the concatenated
+payloads of the data blocks to standard output, skipping headers. This lets you
+extract a tape's raw contents for piping elsewhere:</p>
+<pre><code>loadtap -r game.tap &gt; game.payload
+</code></pre>
+<p>The analysis output is byte-identical to the older zxgotools tool's, so existing
+scripts that parse it continue to work unchanged.</p>
+<h2 id="tap2tzx">tap2tzx</h2>
+<p>Converts one or more TAP files into a single TZX, optionally adding metadata,
+hardware information, and grouping.</p>
+<pre><code>tap2tzx -o out.tzx [options] input1.tap [input2.tap ...]
+tap2tzx -o out.tzx -c config.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-o</code></td>
+<td>—</td>
+<td>Output TZX file. Required.</td>
+</tr>
+<tr>
+<td><code>-c</code></td>
+<td>—</td>
+<td>JSON configuration file (see below).</td>
+</tr>
+<tr>
+<td><code>-p</code></td>
+<td>1000</td>
+<td>Pause between blocks, in milliseconds.</td>
+</tr>
+<tr>
+<td><code>-m</code></td>
+<td>off</td>
+<td>Add a metadata (archive-info) block.</td>
+</tr>
+<tr>
+<td><code>--title</code></td>
+<td>—</td>
+<td>Program title (used with <code>-m</code>).</td>
+</tr>
+<tr>
+<td><code>--author</code></td>
+<td>—</td>
+<td>Program author (used with <code>-m</code>).</td>
+</tr>
+<tr>
+<td><code>--year</code></td>
+<td>—</td>
+<td>Year of publication (used with <code>-m</code>).</td>
+</tr>
+<tr>
+<td><code>-128</code></td>
+<td>off</td>
+<td>The program requires a 128K machine.</td>
+</tr>
+<tr>
+<td><code>-ay</code></td>
+<td>off</td>
+<td>The program uses the AY sound chip.</td>
+</tr>
+<tr>
+<td><code>-paging</code></td>
+<td>off</td>
+<td>The program uses memory paging.</td>
+</tr>
+<tr>
+<td><code>--model</code></td>
+<td>—</td>
+<td>Required model: <code>+2</code>, <code>+2A</code>, or <code>+3</code>.</td>
+</tr>
+<tr>
+<td><code>--multiload</code></td>
+<td>off</td>
+<td>Insert a "stop in 48K mode" block between input files.</td>
+</tr>
+<tr>
+<td><code>--group</code></td>
+<td>—</td>
+<td>Bracket the input files under a named group.</td>
+</tr>
+</tbody>
+</table>
+<p>The hardware flags are recorded in a TZX hardware-type block: <code>-128</code> marks the
+tape as using a 128K machine and not running on a 48K one; <code>--model</code> selects the
+specific 128K variant; <code>-ay</code> marks use of the AY sound chip.</p>
+<p>When several input files are given, their blocks are concatenated in order. With
+<code>--multiload</code>, a "stop in 48K mode" block is placed between each pair of files,
+so that a 48K machine pauses between loading stages while a 128K machine loads
+straight through.</p>
+<p>Example — assemble a titled, 128K, multiload tape from three parts:</p>
+<pre><code>tap2tzx -o game.tzx -m --title &quot;My Game&quot; --author &quot;haitch&quot; --year 2026 \
+        -128 --multiload --group &quot;Game&quot; part1.tap part2.tap part3.tap
+</code></pre>
+<h3 id="configuration-file">Configuration file</h3>
+<p>Instead of flags, <code>-c</code> reads a JSON file describing the whole tape. The schema
+has three sections: <code>metadata</code> (title, author, year), <code>hardware</code>
+(<code>128k_only</code>, <code>use_ay</code>, <code>model</code>), and <code>blocks</code> — an ordered list, each entry
+naming a <code>file</code> to include, with optional <code>group</code> and <code>desc</code> fields. A new
+<code>group</code> value opens a group that runs until the next group or the end.</p>
+<p>The configuration is JSON, not the YAML used by the older tool, so that
+<code>tap2tzx</code> — like the rest of zentools — needs no third-party dependencies. The
+schema is otherwise equivalent.</p>
+<h2 id="zx">zx</h2>
+<p><code>zx</code> is a single command with subcommands organised by format. Unlike the
+focused tools, its flags may appear in any position, before or after the
+positional arguments.</p>
+<pre><code>zx &lt;command&gt; [arguments]
+</code></pre>
+<p>Commands: <code>tap</code>, <code>tzx</code>, <code>basic</code>, <code>snap</code>, <code>convert</code>, <code>info</code>, and <code>version</code>.
+Running any command with no arguments prints its own help.</p>
+<p>Throughout, addresses may be written in hexadecimal (<code>0x8000</code> or <code>$8000</code>) or in
+decimal (<code>32768</code>).</p>
+<h3 id="zx-tap">zx tap</h3>
+<pre><code>zx tap make &lt;input.bin&gt; [--name N] [--origin &lt;addr&gt;] [--loader --start &lt;addr&gt;] -o out.tap
+zx tap info &lt;file.tap&gt;
+</code></pre>
+<p><code>make</code> wraps a binary as a CODE block. <code>--origin</code> sets the load address; <code>--name</code>
+sets the block name. With <code>--loader</code>, a BASIC auto-run loader is prepended so the
+tape loads and then jumps to <code>--start</code>, giving a tape that runs on its own.</p>
+<p><code>info</code> lists the blocks in a tape, showing type, name, load address, and
+checksum status.</p>
+<h3 id="zx-tzx">zx tzx</h3>
+<pre><code>zx tzx make &lt;input.tap&gt; [--title T] [--author A] [--year Y] -o out.tzx
+zx tzx info &lt;file.tzx&gt;
+</code></pre>
+<p><code>make</code> converts a TAP image into TZX, optionally adding an archive-info block
+from the title, author, and year. <code>info</code> lists the TZX blocks by identifier.</p>
+<h3 id="zx-basic">zx basic</h3>
+<pre><code>zx basic tokenise   &lt;input.bas&gt; -o out.bin [--case-sensitive]
+zx basic detokenise &lt;input.bin&gt; [-o out.bas]
+</code></pre>
+<p><code>tokenise</code> converts BASIC source text into the Spectrum's internal byte format.
+Matching is case-independent by default; <code>--case-sensitive</code> requires exact
+keyword case. <code>detokenise</code> does the reverse, printing to standard output unless
+<code>-o</code> is given.</p>
+<h3 id="zx-snap">zx snap</h3>
+<pre><code>zx snap make &lt;input.bin&gt; --start &lt;addr&gt; [--origin &lt;addr&gt;] [--sp &lt;addr&gt;] [--model &lt;name&gt;] [--sna] [--z80] -o &lt;basename&gt;
+zx snap info &lt;file.sna|file.z80&gt;
+</code></pre>
+<p><code>make</code> builds a snapshot from a binary. The binary is placed in memory at
+<code>--origin</code> (default 0x8000), the program counter is set to <code>--start</code> (required),
+the stack pointer to <code>--sp</code> (default 0xFF00), and the machine type to <code>--model</code>
+(<code>48k</code>, <code>128k</code>, <code>plus2</code>, <code>plus2a</code>, or <code>plus3</code>; default <code>48k</code>). At least one of
+<code>--sna</code> or <code>--z80</code> selects the output format; both may be given. The code is
+overlaid onto a genuine booted machine state, so the resulting snapshot loads
+and runs at the entry point.</p>
+<p><code>info</code> decodes a snapshot and reports its model, program counter, stack pointer,
+interrupt mode and flag, and — on 128K machines — the paging value.</p>
+<p>Example — build a runnable 48K snapshot in both formats:</p>
+<pre><code>zx snap make demo.bin --start 0x8000 --sna --z80 -o demo
+</code></pre>
+<h3 id="zx-convert">zx convert</h3>
+<pre><code>zx convert &lt;input&gt; -o &lt;output&gt; [--start &lt;addr&gt;] [--sp &lt;addr&gt;] [--model &lt;name&gt;]
+</code></pre>
+<p>Converts a file between any supported tape or snapshot format. The source and
+target formats are taken from the file extensions. The <code>--start</code>, <code>--sp</code>, and
+<code>--model</code> flags apply only when converting a tape into a snapshot, where an entry
+point is needed.</p>
+<p>The behaviour of each conversion is set out in full in the next section.</p>
+<h3 id="zx-info">zx info</h3>
+<pre><code>zx info &lt;file&gt;
+</code></pre>
+<p>Identifies a file's format — by signature where possible, otherwise by
+extension — and prints the appropriate summary, as <code>zx tap info</code>, <code>zx tzx info</code>,
+or <code>zx snap info</code> would.</p>
+<h2 id="conversions-in-depth">Conversions in depth</h2>
+<p><code>zx convert</code> spans the format matrix below. The two axes are the source format
+(rows) and the target format (columns).</p>
+<table>
+<thead>
+<tr>
+<th>from \ to</th>
+<th>tap</th>
+<th>tzx</th>
+<th>sna</th>
+<th>z80</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>tap</strong></td>
+<td>—</td>
+<td>lossless</td>
+<td>needs start</td>
+<td>needs start</td>
+</tr>
+<tr>
+<td><strong>tzx</strong></td>
+<td>lossless*</td>
+<td>—</td>
+<td>needs start</td>
+<td>needs start</td>
+</tr>
+<tr>
+<td><strong>sna</strong></td>
+<td>memory dump</td>
+<td>memory dump</td>
+<td>—</td>
+<td>lossless</td>
+</tr>
+<tr>
+<td><strong>z80</strong></td>
+<td>memory dump</td>
+<td>memory dump</td>
+<td>lossless</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>The cells fall into four cases.</p>
+<h3 id="within-a-kind-lossless">Within a kind: lossless</h3>
+<p><strong>tap to tzx, and tzx to tap.</strong> A TAP block wraps directly into a TZX
+standard-speed data block, and a TZX standard-speed block unwraps directly back
+into a TAP block. Round-tripping a tape through TZX and back yields the original
+bytes.</p>
+<p>The asterisk on <strong>tzx to tap</strong> marks the one caveat: only standard-speed data
+survives the trip down to TAP, because TAP has no way to express anything else.
+A TZX file produced by zentools contains only standard-speed blocks, so its
+conversion is lossless. But a TZX from elsewhere may carry turbo or custom-loader
+blocks, or structural blocks (groups, hardware information, archive metadata);
+these have no TAP equivalent and are dropped. When that happens, <code>zx convert</code>
+prints a note saying how many blocks were dropped.</p>
+<p><strong>sna to z80, and z80 to sna.</strong> Both formats are containers for the same thing —
+a complete machine state — so transcoding between them is lossless. (One small
+detail of the 48K SNA format is discussed below; it does not lose information.)</p>
+<h3 id="across-the-divide-downward-snapshot-to-tape">Across the divide, downward: snapshot to tape</h3>
+<p>A snapshot holds a running machine; a tape holds blocks to load. Going from
+snapshot to tape, the best a tape can do is carry the snapshot's RAM as a CODE
+block. But this discards everything that made it a snapshot: the processor
+registers, the interrupt state, and the program counter that said where to
+resume. The resulting tape is a <strong>memory dump</strong> — it will load the bytes back
+into memory, but it will not resume execution where the snapshot left off, and
+on a 128K machine it cannot express the paging of the banks that are not
+currently visible.</p>
+<p><code>zx convert</code> performs this conversion but prints a warning making the loss
+explicit. It is useful for recovering data from a snapshot, not for producing a
+runnable program.</p>
+<h3 id="across-the-divide-upward-tape-to-snapshot">Across the divide, upward: tape to snapshot</h3>
+<p>A tape carries code and a load address but no entry point, so it cannot, by
+itself, say where a snapshot should begin executing. Converting a tape to a
+snapshot therefore <strong>requires a <code>--start</code> address</strong>; without one, <code>zx convert</code>
+reports the error rather than guessing. Given a start address, the tool extracts
+the tape's CODE block, overlays it onto a booted machine state — exactly as
+<code>zx snap make</code> does with a binary — and produces a snapshot that runs. The
+<code>--sp</code> and <code>--model</code> flags tune the stack pointer and machine type.</p>
+<h3 id="a-note-on-the-48k-sna-format">A note on the 48K SNA format</h3>
+<p>The 48K SNA format has no field for the program counter. Instead it stores the
+program counter by pushing it onto the machine's stack, so that the loader
+returns into the running program. A consequence is that transcoding <em>into</em> a 48K
+SNA writes two bytes near the stack pointer and adjusts the stack pointer
+accordingly; transcoding back reads them and restores it. The program counter
+and stack pointer are preserved exactly across a round trip, and the snapshot
+runs correctly; this is a property of the SNA format, not a loss of information.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

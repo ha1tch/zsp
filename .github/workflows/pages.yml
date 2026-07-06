@@ -1,0 +1,61 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out zsp
+        uses: actions/checkout@v4
+        with:
+          path: zsp
+
+      # build_site.py resolves ROOT as the parent of the zsp repo, and
+      # expects every source project cloned as a sibling directory —
+      # exactly like the local development setup in PROCEDURES.md.
+      - name: Check out sibling projects
+        run: |
+          for repo in zentools zen80 zenzx zenas zenimate plus3 bdf-fonts; do
+            git clone --depth 1 "https://github.com/ha1tch/${repo}.git" "${repo}"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install markdown
+
+      - name: Build site
+        run: python3 tools/build_site.py
+        working-directory: zsp
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: zsp/zsp_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>+3DOS disk images: the parts that bite you · plus3 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-yellow);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to plus3</a>
+<article class="doc-body">
+<h1 id="3dos-disk-images-the-parts-that-bite-you">+3DOS disk images: the parts that bite you</h1>
+<p>This document collects the things that were obscure, badly documented, or simply
+absent from the references while implementing a +3DOS disk-image writer and reader.
+The official Part-27 guide (<code>plus3dos.txt</code>) is the reference; this is the companion
+that explains where it is easy to go wrong.</p>
+<p>The recurring lesson runs through everything below: <strong>a disk image that round-trips
+perfectly through your own reader and writer can still be rejected by a real
+Spectrum +3.</strong> A reader and writer that share the same wrong assumption will agree
+with each other indefinitely. The only authority is real +3DOS — either a physical
+machine, or a disk written by one that you can diff against. Several of the points
+below were invisible to software testing and only surfaced on hardware.</p>
+<p>The format is the standard 180K single-sided +3 / PCW (CP/M Plus) layout: 40
+tracks, 9 sectors per track, 512-byte sectors, 1 KB allocation blocks, a 64-entry
+directory. Everything here assumes that layout.</p>
+<hr />
+<h2 id="1-the-directory-is-on-track-1-not-track-0">1. The directory is on track 1, not track 0</h2>
+<p>Track 0 is the reserved system track (XDPB <code>OFF = 1</code>). The directory lives at the
+start of the <strong>data area</strong>, which begins on track 1. It is easy to assume the
+directory is "at the beginning" and write it to track 0; a real +3 then reports the
+disk as empty because it looks for the catalogue on track 1.</p>
+<p>The directory occupies the first 4 sectors of track 1 (2 KB = 64 entries x 32
+bytes).</p>
+<h2 id="2-a-directory-entry-is-exactly-32-bytes-and-the-field-layout-is-rigid">2. A directory entry is exactly 32 bytes — and the field layout is rigid</h2>
+<p>The canonical CP/M directory entry is 32 bytes:</p>
+<pre><code>offset size field
+  0      1   status / user number
+  1      8   filename (space-padded)
+  9      3   extension (space-padded; high bits are attribute flags)
+ 12      1   Xl  - extent number, low byte
+ 13      1   Bc  - byte count in the last record
+ 14      1   Xh  - extent number, high byte
+ 15      1   Rc  - record count in this extent (number of 128-byte records)
+ 16     16   Al  - allocation: the block NUMBERS used by this extent
+</code></pre>
+<p>That sums to 32. If you model the entry with extra convenience fields (a separate
+"first record" byte, a 16-bit "logical size", etc.) and then serialise the struct
+directly, you get a 33-, 34-, or 35-byte entry. Every entry after the first is then
+shifted, and the whole directory is corrupt — but your own reader, using the same
+oversized struct, will parse it back without complaint. Serialise to exactly 32
+bytes and verify it (a one-line test: serialise an empty entry, assert length 32).</p>
+<p>The file's byte-exact length is <strong>not</strong> in the directory. <code>Rc</code> gives the length
+only to the nearest 128-byte record. For an exact length, read the PLUS3DOS header
+(see section 6).</p>
+<h2 id="3-the-status-byte-is-the-user-number-and-the-default-is-0-not-1">3. The status byte is the user number — and the default is 0, not 1</h2>
+<p>This one is genuinely a trap. The status byte (offset 0) is the CP/M <strong>user area</strong>
+(0-15), with <code>0xE5</code> meaning "unused/deleted". The +3 catalogues <strong>user 0</strong> by
+default. If you write a file with status <code>0x01</code> (a natural-looking "this slot is in
+use" value), the file is physically present and correct, but <code>CAT</code> shows nothing —
+the +3 is looking in user 0 and your file is in user 1. Write files as user <strong>0</strong>
+(<code>0x00</code>).</p>
+<p>The consequence ripples: because a valid file's status is <code>0x00</code>, you cannot use
+"status == 0x00" to mean "free slot". A free slot is <code>0xE5</code> <strong>or</strong> a zero entry with
+a blank name. A real user-0 file has status <code>0x00</code> <em>and a non-blank name</em> and must
+not be treated as free, or your next "add" will overwrite it.</p>
+<h2 id="4-the-allocation-field-holds-block-numbers-not-a-count">4. The allocation field holds block NUMBERS, not a count</h2>
+<p><code>Al</code> (offset 16, 16 bytes) is a list of the allocation-block numbers the file
+occupies, in order — e.g. <code>03 04 05 06 07 08 09 00 ...</code> for a file in blocks 3-9.
+It is <strong>not</strong> a count of blocks and <strong>not</strong> a length. Storing the block count there
+(a single small number) produces a directory entry that points at the wrong place;
+the file data is written correctly elsewhere, but the +3 follows the bogus pointer
+and finds filler. For 1 KB blocks the numbers fit one per byte.</p>
+<h2 id="5-block-to-sector-mapping-blocks-are-numbered-from-the-data-area">5. Block-to-sector mapping: blocks are numbered from the data area</h2>
+<p>An allocation block is two 512-byte sectors. Block numbering starts at the data
+area (track 1), <strong>not</strong> at the physical start of the disk. The mapping that a real
+disk actually uses is:</p>
+<pre><code>linear_sector = block * 2          (+ 0 or 1 for the two sectors in the block)
+track  = 1 + linear_sector / 9     (the 1 accounts for the reserved track 0)
+sector = linear_sector % 9         (0-based here; physical sector IDs are 1..9)
+</code></pre>
+<p>The way to be sure is to take a real disk, read a file's <code>Al</code> block number from its
+directory entry, and confirm that mapping lands on the sectors that actually hold
+the file's data (the first of which begins with the <code>PLUS3DOS</code> header). Reasoning
+from the spec alone is where the off-by-one in the reserved track creeps in.</p>
+<p>Sectors are physically numbered <strong>1 to 9</strong> (R=1..9), not 0 to 8. Off-by-one here
+silently reads or writes the wrong sector.</p>
+<h2 id="6-the-plus3dos-file-header-version-0-and-what-wrong-file-type-really-means">6. The PLUS3DOS file header: version 0, and what "wrong file type" really means</h2>
+<p>Files may carry a 128-byte header record in their first 128 bytes:</p>
+<pre><code>0..7    'PLUS3DOS' signature
+8       0x1A  (soft-EOF)
+9       issue number
+10      version number
+11..14  total file length, 32-bit little-endian (header + data)
+15..22  the 8-byte +3 BASIC header (see below)
+23..126 reserved (zero)
+127     checksum = sum of bytes 0..126, modulo 256
+</code></pre>
+<p>Two things here cost real debugging time:</p>
+<p><strong>The version must be 0.</strong> The spec says "the version number must be less than or
+equal to the software's version number." +3DOS is version 0, so a header declaring
+version <strong>1</strong> is rejected. The failure does not say "bad version" — it surfaces as
+<strong>"Wrong file type"</strong>, because a rejected header makes +3DOS treat the file as
+headerless / not what the command expected. If <code>LOAD ""CODE</code> returns "Wrong file
+type" on a file you believe is correct, check the version byte before anything else.
+Real +3-written files use issue 1, version 0.</p>
+<p><strong>The length field is the total, including the header.</strong> Bytes 11..14 are
+<code>128 + data_length</code>, not the data length alone. This is the authoritative file
+length; use it for byte-exact extraction rather than <code>Rc * 128</code>, which rounds up.</p>
+<p>The checksum must be present and correct, or the header is not recognised as a
+header at all (and again you get headerless/wrong-type behaviour rather than a
+checksum error).</p>
+<h2 id="7-the-8-byte-basic-sub-header-especially-for-code-files">7. The 8-byte BASIC sub-header, especially for CODE files</h2>
+<p>Bytes 15..22 of the PLUS3DOS header are the same 8 bytes the Spectrum's tape header
+uses:</p>
+<pre><code>15      file type   (0 = BASIC program, 1 = numeric array,
+                     2 = character array, 3 = CODE/bytes)
+16..17  length of the data
+18..19  parameter 1
+20..21  parameter 2
+</code></pre>
+<p>For <strong>CODE</strong> files (type 3), parameter 1 is the load address. Parameter 2 is the
+subtle one: real +3DOS writes <strong>0x8000 (32768)</strong> there. Leaving it 0 is not
+obviously wrong and may even load, but it does not match what the machine itself
+produces. The way this was pinned down was by saving a CODE file from a real +3 onto
+an image and diffing its header — parameter 2 came back as 0x8000 every time. When
+in doubt about a header field, let the +3 write one and diff it; that beats guessing
+from the spec.</p>
+<p>For BASIC programs (type 0), parameter 1 is the auto-run line (or 0x8000 / &gt;=32768
+meaning "no auto-run") and parameter 2 is the length of the program without
+variables.</p>
+<h2 id="8-the-dsk-container-standard-vs-extended">8. The <code>.dsk</code> container: standard vs extended</h2>
+<p>The on-disk <code>.dsk</code> file is a host-side container, distinct from the CP/M filesystem
+inside it. There are two variants and real +3 disks are almost always the second:</p>
+<ul>
+<li><strong>Standard</strong> — signature begins <code>MV - CPC</code>. A single track size in the header
+  applies to every track.</li>
+<li><strong>Extended</strong> — signature begins <code>EXTENDED CPC</code>. A per-track size table starts at
+  offset 0x34, one byte per track, each multiplied by 256 to get that track's size;
+  a value of 0 means the track is absent.</li>
+</ul>
+<p>A reader that only handles the standard variant will fail on most real disks. Note
+also that the track-information block within each track is identified by a
+<code>Track-Info</code> signature that real writers pad with <code>NUL</code> (not <code>CR</code>/<code>LF</code>), so match on
+the prefix rather than an exact string.</p>
+<p>A standard +3 data disk leaves the disk-specification/boot sector as <code>0xE5</code> filler
+and logs on via the default XDPB; you do <strong>not</strong> need to synthesise a boot/spec
+sector for a plain data disk. The bootable-disk checksum (the byte that makes
+sector 0 sum to 3 modulo 256) only applies to actually-bootable disks; do not apply
+that check to ordinary data disks whose first sector is <code>0xE5</code> filler.</p>
+<h2 id="9-tokenised-basic-the-hidden-bytes-inside-a-number">9. Tokenised BASIC: the hidden bytes inside a number</h2>
+<p>Detokenising a BASIC program (turning the stored bytes back into readable text) is
+mostly a simple walk:</p>
+<pre><code>each line:  [line number: 2 bytes, BIG-endian]
+            [text length: 2 bytes, little-endian]
+            [text ... ]
+            [0x0D]
+</code></pre>
+<p>Note the line number is <strong>big-endian</strong> while the length is little-endian — a mix
+that is easy to get wrong. Keyword tokens are single bytes 0xA3..0xFF.</p>
+<p>The trap is numbers. When a program contains a numeric constant, it is stored as its
+<strong>visible ASCII digits</strong> followed by a marker byte <code>0x0E</code> and then <strong>5 bytes</strong> of
+the binary value. A detokeniser that does not know to skip those 5 bytes after a
+<code>0x0E</code> will dump them as garbage characters into the output. The reason this is easy
+to miss: a <code>REM</code>-only line, or any line without numbers, decodes perfectly without
+handling <code>0x0E</code> at all — so the code looks correct until the first real program with
+a number in it. Test the detokeniser against a program that actually contains
+numbers (a loader with <code>BORDER 0</code>, <code>CLEAR 32767</code>, <code>RANDOMIZE USR x</code>), not just text.</p>
+<p>Two keyword values are 128K-only and sit just below the main range: <code>SPECTRUM</code>
+(0xA3) and <code>PLAY</code> (0xA4). A 48K-only token table will mis-decode 128K programs that
+use them.</p>
+<hr />
+<h2 id="how-to-verify-any-of-this">How to verify any of this</h2>
+<p>The single most useful technique throughout was <strong>diffing against ground truth</strong>:</p>
+<ol>
+<li>Take a real disk a +3 reads, or have a +3 write a file onto an image you made.</li>
+<li>Read the bytes back and compare field by field against what your code produces.</li>
+<li>Where they differ, the +3 is right.</li>
+</ol>
+<p>Software round-trips confirm internal consistency, which is necessary but not
+sufficient. The directory geometry, the user-area default, the header version, and
+the CODE parameter were all caught this way and not by any amount of
+write-then-read-back testing.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

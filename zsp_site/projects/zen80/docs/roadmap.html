@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zen80 Performance optimisation Guide · zen80 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-red);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zen80</a>
+<article class="doc-body">
+<h1 id="zen80-performance-optimisation-guide">zen80 Performance optimisation Guide</h1>
+<p>Here we outline a comprehensive strategy to optimise the zen80 Z80 emulator for maximum performance while maintaining code readability and maintainability. We'll use Go's code generation capabilities to create a dual-implementation approach: a readable reference implementation and a generated high-performance implementation.</p>
+<h2 id="current-architecture-analysis">Current Architecture Analysis</h2>
+<h3 id="performance-bottlenecks">Performance Bottlenecks</h3>
+<p>The current zen80 implementation has several performance bottlenecks:</p>
+<ol>
+<li>
+<p><strong>Multi-level dispatch overhead</strong> (~15-25 cycles)
+   - Initial decode: 2-3 cycles
+   - First switch (x): 1-2 cycles<br />
+   - Method call: 5-10 cycles
+   - Second switch (z): 2-4 cycles
+   - Third switch (y): 2-4 cycles</p>
+</li>
+<li>
+<p><strong>Method call overhead</strong>
+   - Stack frame setup/teardown
+   - Parameter passing (5 parameters)
+   - Register pressure from call convention</p>
+</li>
+<li>
+<p><strong>Missed optimisation opportunities</strong>
+   - Go compiler cannot inline across method boundaries
+   - Cannot optimise across function calls
+   - Branch prediction suffers from nested switches</p>
+</li>
+</ol>
+<h3 id="strengths-to-preserve">Strengths to Preserve</h3>
+<ol>
+<li><strong>Clean modular design</strong> - Excellent for understanding Z80 architecture</li>
+<li><strong>Maintainable code</strong> - Easy to debug and modify</li>
+<li><strong>Type safety</strong> - Interfaces for Memory/IO</li>
+<li><strong>Test coverage</strong> - Existing tests validate behaviour</li>
+</ol>
+<h2 id="optimisation-strategy">optimisation Strategy</h2>
+<h3 id="core-principle-source-of-truth-generated-performance">Core Principle: Source of Truth + Generated Performance</h3>
+<p>We'll maintain the current readable implementation as the "source of truth" and generate optimised code from it. This gives us:</p>
+<ul>
+<li><strong>Readable code</strong> for debugging and understanding</li>
+<li><strong>Generated code</strong> for production performance</li>
+<li><strong>Single source of truth</strong> for instruction behaviour</li>
+<li><strong>Automated verification</strong> that both implementations match</li>
+</ul>
+<h3 id="three-layer-architecture">Three-Layer Architecture</h3>
+<pre><code>┌─────────────────────────────────────┐
+│   Layer 1: Instruction Definition   │  &lt;- Source of truth
+│   (YAML/JSON instruction database)  │
+└────────────┬────────────────────────┘
+             │ generate
+    ┌────────▼────────┐
+    │                 │                
+┌───v──────────┐ ┌────v──────────────┐
+│   Layer 2:   │ │    Layer 3:       │
+│   Reference  │ │    optimised      │
+│   Readable   │ │    Generated      │
+│   decode.go  │ │ decode_fast.go    │
+└──────────────┘ └───────────────────┘
+</code></pre>
+<h2 id="implementation-plan">Implementation Plan</h2>
+<h3 id="stage-1-instruction-database-week-1">Stage 1: Instruction Database (Week 1)</h3>
+<p>Create a comprehensive instruction database that captures all Z80 instruction semantics.</p>
+<h4 id="file-z80instructionsyaml">File: <code>z80/instructions.yaml</code></h4>
+<pre><code class="language-yaml"># Example structure
+instructions:
+  - opcode: 0x00
+    mnemonic: &quot;NOP&quot;
+    cycles: 4
+    flags_affected: []
+    implementation:
+      go: |
+        // No operation
+
+  - opcode: 0x01
+    mnemonic: &quot;LD BC,nn&quot;
+    cycles: 10
+    bytes: 3
+    flags_affected: []
+    implementation:
+      go: |
+        cpu.SetBC(cpu.fetchWord())
+
+  - opcode: 0x80
+    mnemonic: &quot;ADD A,B&quot;
+    cycles: 4
+    flags_affected: [&quot;S&quot;, &quot;Z&quot;, &quot;H&quot;, &quot;P/V&quot;, &quot;N&quot;, &quot;C&quot;, &quot;X&quot;, &quot;Y&quot;]
+    implementation:
+      go: |
+        cpu.add8(cpu.B)
+
+  - opcode: 0xCB
+    prefix: true
+    name: &quot;CB prefix&quot;
+    subcodes:
+      - opcode: 0x00
+        mnemonic: &quot;RLC B&quot;
+        cycles: 8
+        implementation:
+          go: |
+            cpu.B = cpu.rlc8(cpu.B)
+</code></pre>
+<h3 id="stage-2-code-generator-framework-week-1">Stage 2: Code Generator Framework (Week 1)</h3>
+<h4 id="file-z80generatorgeneratorgo">File: <code>z80/generator/generator.go</code></h4>
+<pre><code class="language-go">//go:build ignore
+
+package main
+
+import (
+    &quot;bytes&quot;
+    &quot;fmt&quot;
+    &quot;go/format&quot;
+    &quot;gopkg.in/yaml.v3&quot;
+    &quot;io/ioutil&quot;
+    &quot;log&quot;
+    &quot;os&quot;
+    &quot;text/template&quot;
+)
+
+type Instruction struct {
+    Opcode       uint8    `yaml:&quot;opcode&quot;`
+    Mnemonic     string   `yaml:&quot;mnemonic&quot;`
+    Cycles       int      `yaml:&quot;cycles&quot;`
+    Bytes        int      `yaml:&quot;bytes&quot;`
+    Flags        []string `yaml:&quot;flags_affected&quot;`
+    Implementation struct {
+        Go string `yaml:&quot;go&quot;`
+    } `yaml:&quot;implementation&quot;`
+    Prefix   bool `yaml:&quot;prefix,omitempty&quot;`
+    Subcodes []Instruction `yaml:&quot;subcodes,omitempty&quot;`
+}
+
+type InstructionSet struct {
+    Instructions []Instruction `yaml:&quot;instructions&quot;`
+}
+
+const decoderTemplate = `// Code generated by generator.go; DO NOT EDIT.
+// Source: instructions.yaml
+// Generated: {{ .Timestamp }}
+
+package z80
+
+// executeoptimised is the generated high-performance instruction decoder
+func (cpu *Z80) executeoptimised(opcode uint8) int {
+    switch opcode {
+    {{- range .Instructions }}
+    case 0x{{ printf &quot;%02X&quot; .Opcode }}: // {{ .Mnemonic }}
+        {{- if .Prefix }}
+        return cpu.execute{{ .Mnemonic }}()
+        {{- else }}
+        {{ .Implementation.Go }}
+        return {{ .Cycles }}
+        {{- end }}
+    {{ end }}
+    default:
+        return 4 // NOP
+    }
+}
+
+// Inlined helper functions for maximum performance
+{{ range .HelperFunctions }}
+{{ . }}
+{{ end }}
+`
+
+func main() {
+    // Load instruction database
+    data, err := ioutil.ReadFile(&quot;instructions.yaml&quot;)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    var instrSet InstructionSet
+    if err := yaml.Unmarshal(data, &amp;instrSet); err != nil {
+        log.Fatal(err)
+    }
+
+    // Generate optimised decoder
+    generateoptimisedDecoder(instrSet)
+
+    // Generate readable reference
+    generateReadableDecoder(instrSet)
+
+    // Generate tests
+    generateVerificationTests(instrSet)
+}
+</code></pre>
+<h3 id="stage-3-optimisation-techniques-week-2">Stage 3: optimisation Techniques (Week 2)</h3>
+<h4 id="31-instruction-inlining">3.1 Instruction Inlining</h4>
+<p>For simple instructions, inline the entire implementation:</p>
+<pre><code class="language-go">case 0x80: // ADD A,B
+    // Fully inlined ADD operation
+    result := uint16(cpu.A) + uint16(cpu.B)
+    halfCarry := (cpu.A&amp;0x0F + cpu.B&amp;0x0F) &gt; 0x0F
+    overflow := ((cpu.A^cpu.B)&amp;0x80 == 0) &amp;&amp; ((cpu.A^uint8(result))&amp;0x80 != 0)
+
+    cpu.A = uint8(result)
+    cpu.F = 0 // Clear all flags
+    if cpu.A == 0 { cpu.F |= FlagZ }
+    if cpu.A&amp;0x80 != 0 { cpu.F |= FlagS }
+    if halfCarry { cpu.F |= FlagH }
+    if overflow { cpu.F |= FlagPV }
+    if result &gt; 0xFF { cpu.F |= FlagC }
+    cpu.F |= (cpu.A &amp; (FlagX | FlagY))
+    return 4
+</code></pre>
+<h4 id="32-computed-tables-for-complex-operations">3.2 Computed Tables for Complex Operations</h4>
+<p>Generate lookup tables for complex operations:</p>
+<pre><code class="language-go">// Generated parity lookup table
+var parityTable = [256]bool{
+    true, false, false, true, // 0x00-0x03
+    // ... all 256 entries
+}
+
+// Generated DAA lookup table
+var daaTable = [2048]struct {
+    result uint8
+    flags  uint8
+}{
+    // Indexed by: [N flag][C flag][H flag][A value]
+    // ... all combinations pre-computed
+}
+</code></pre>
+<h4 id="33-branch-prediction-optimisation">3.3 Branch Prediction optimisation</h4>
+<p>Organize cases by frequency (profiled from real programs):</p>
+<pre><code class="language-go">func (cpu *Z80) executeoptimised(opcode uint8) int {
+    // Most common instructions first
+    switch opcode {
+    case 0x00: return 4                    // NOP (very common)
+    case 0x21: cpu.SetHL(cpu.fetchWord()); return 10  // LD HL,nn
+    case 0x3E: cpu.A = cpu.fetchByte(); return 7      // LD A,n
+    case 0xC3: cpu.PC = cpu.fetchWord(); return 10    // JP nn
+
+    // Then handle prefixes
+    case 0xCB, 0xDD, 0xED, 0xFD:
+        return cpu.executePrefix(opcode)
+
+    // Then less common instructions
+    default:
+        return cpu.executeRare(opcode)
+    }
+}
+</code></pre>
+<h4 id="34-profile-guided-generation">3.4 Profile-Guided Generation</h4>
+<p>Use runtime profiling to optimise:</p>
+<pre><code class="language-go">//go:generate go test -run=XXX -bench=BenchmarkRealPrograms -cpuprofile=cpu.prof
+//go:generate go tool pprof -text cpu.prof &gt; instruction_frequency.txt
+//go:generate go run generator.go -profile=instruction_frequency.txt
+</code></pre>
+<h3 id="stage-4-verification-framework-week-2">Stage 4: Verification Framework (Week 2)</h3>
+<h4 id="file-z80verify_testgo">File: <code>z80/verify_test.go</code></h4>
+<pre><code class="language-go">package z80
+
+import (
+    &quot;testing&quot;
+    &quot;reflect&quot;
+)
+
+// TestGeneratedMatchesReference ensures both implementations produce identical results
+func TestGeneratedMatchesReference(t *testing.T) {
+    // Test every single opcode
+    for opcode := 0; opcode &lt; 256; opcode++ {
+        t.Run(fmt.Sprintf(&quot;Opcode_%02X&quot;, opcode), func(t *testing.T) {
+            // Create two identical CPUs
+            mem1 := &amp;mockMemory{}
+            mem2 := &amp;mockMemory{}
+            cpu1 := New(mem1, &amp;mockIO{})
+            cpu2 := New(mem2, &amp;mockIO{})
+
+            // Initialize identically
+            setupTestState(cpu1, mem1)
+            setupTestState(cpu2, mem2)
+
+            // Execute with both implementations
+            cycles1 := cpu1.execute(uint8(opcode))
+
+            // Reset and execute with optimised
+            setupTestState(cpu2, mem2)
+            cycles2 := cpu2.executeoptimised(uint8(opcode))
+
+            // Verify identical results
+            if cycles1 != cycles2 {
+                t.Errorf(&quot;Cycle mismatch: ref=%d opt=%d&quot;, cycles1, cycles2)
+            }
+
+            if !reflect.DeepEqual(cpu1, cpu2) {
+                t.Errorf(&quot;State mismatch after opcode %02X&quot;, opcode)
+            }
+        })
+    }
+}
+
+// Differential testing against ZEXALL
+func TestoptimisedPassesZEXALL(t *testing.T) {
+    // Run ZEXALL with optimised implementation
+    // Compare CRC results with reference
+}
+</code></pre>
+<h3 id="stage-5-build-integration-week-3">Stage 5: Build Integration (Week 3)</h3>
+<h4 id="file-z80makefile">File: <code>z80/Makefile</code></h4>
+<pre><code class="language-makefile">.PHONY: generate test bench all
+
+# Default uses readable implementation
+all: test
+
+# Generate optimised implementation
+generate:
+    @echo &quot;Generating optimised decoder...&quot;
+    @go run generator/generator.go
+    @echo &quot;Formatting generated code...&quot;
+    @gofmt -w decode_optimised.go
+    @echo &quot;Running verification tests...&quot;
+    @go test -run TestGeneratedMatchesReference
+
+# Benchmark both implementations
+bench: generate
+    @echo &quot;Benchmarking reference implementation...&quot;
+    @go test -bench=BenchmarkReference -benchmem
+    @echo &quot;Benchmarking optimised implementation...&quot;
+    @go test -tags=optimised -bench=Benchmarkoptimised -benchmem
+
+# Run all tests with both implementations
+test: generate
+    @go test ./...
+    @go test -tags=optimised ./...
+
+# Profile-guided optimisation
+profile:
+    @go test -run=XXX -bench=BenchmarkRealPrograms -cpuprofile=cpu.prof
+    @go tool pprof -text cpu.prof &gt; instruction_frequency.txt
+    @go run generator/generator.go -profile=instruction_frequency.txt
+
+# Clean generated files
+clean:
+    @rm -f decode_optimised.go decode_reference.go
+    @rm -f *.prof instruction_frequency.txt
+</code></pre>
+<h4 id="file-z80build_tagsgo">File: <code>z80/build_tags.go</code></h4>
+<pre><code class="language-go">//go:build !optimised
+// +build !optimised
+
+package z80
+
+// Step executes one instruction using the readable implementation
+func (cpu *Z80) Step() int {
+    // ... existing implementation
+    opcode := cpu.fetchByte()
+    return cpu.execute(opcode)
+}
+</code></pre>
+<h4 id="file-z80build_tags_optimisedgo">File: <code>z80/build_tags_optimised.go</code></h4>
+<pre><code class="language-go">//go:build optimised
+// +build optimised
+
+package z80
+
+// Step executes one instruction using the optimised implementation
+func (cpu *Z80) Step() int {
+    // ... optimised implementation
+    opcode := cpu.fetchByte()
+    return cpu.executeoptimised(opcode)
+}
+</code></pre>
+<h2 id="advanced-optimisations">Advanced optimisations</h2>
+<h3 id="profile-guided-optimisation-pgo">Profile-Guided optimisation (PGO)</h3>
+<p>With Go 1.21+, we can use PGO:</p>
+<pre><code class="language-bash"># Collect profile from real workload
+go test -bench=BenchmarkRealPrograms -cpuprofile=default.pgo
+
+# Build with PGO
+go build -pgo=default.pgo
+
+# The compiler will optimise based on actual usage patterns
+</code></pre>
+<h3 id="memory-layout-optimisation">Memory Layout optimisation</h3>
+<p>optimise struct layout for cache efficiency:</p>
+<pre><code class="language-go">// Before: scattered fields
+type Z80 struct {
+    A, F, B, C, D, E, H, L uint8  // 8 bytes
+    SP uint16                      // 2 bytes (padding: 6 bytes)
+    PC uint16                      // 2 bytes (padding: 6 bytes)
+    // ... more fields
+}
+
+// After: cache-line optimised
+type Z80 struct {
+    // Hot path: registers and PC on same cache line
+    PC uint16                      // 2 bytes
+    SP uint16                      // 2 bytes
+    padding1 uint32                // 4 bytes alignment
+    A, F, B, C, D, E, H, L uint8  // 8 bytes
+    // Total: 16 bytes (quarter cache line)
+
+    // Warm path: alternate registers
+    A_, F_, B_, C_, D_, E_, H_, L_ uint8 // 8 bytes
+
+    // Cold path: other fields
+    // ...
+}
+</code></pre>
+<h3 id="conditional-compilation">Conditional Compilation</h3>
+<p>Support different optimisation levels:</p>
+<pre><code class="language-go">// z80_config.go
+package z80
+
+const (
+    // optimisationLevel can be: &quot;debug&quot;, &quot;balanced&quot;, &quot;performance&quot;
+    optimisationLevel = &quot;balanced&quot;
+)
+
+// Generated code uses this:
+func (cpu *Z80) executeoptimised(opcode uint8) int {
+    switch optimisationLevel {
+    case &quot;debug&quot;:
+        return cpu.executeDebug(opcode)      // Full tracing
+    case &quot;balanced&quot;:
+        return cpu.executeBalanced(opcode)   // Some inlining
+    case &quot;performance&quot;:
+        return cpu.executeMaxPerf(opcode)    // Everything inlined
+    }
+}
+</code></pre>
+<h2 id="performance-targets">Performance Targets</h2>
+<h3 id="expected-improvements">Expected Improvements</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Current</th>
+<th>optimised</th>
+<th>Improvement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decode Overhead</td>
+<td>15-25 cycles</td>
+<td>3-5 cycles</td>
+<td>5x</td>
+</tr>
+<tr>
+<td>Simple Instructions (NOP, LD r,r')</td>
+<td>19-29 cycles</td>
+<td>7-9 cycles</td>
+<td>3x</td>
+</tr>
+<tr>
+<td>Complex Instructions (DAA, RLD)</td>
+<td>30-40 cycles</td>
+<td>20-25 cycles</td>
+<td>1.5x</td>
+</tr>
+<tr>
+<td>Overall Performance</td>
+<td>Baseline</td>
+<td>+25-40%</td>
+<td>1.3-1.4x</td>
+</tr>
+</tbody>
+</table>
+<h3 id="benchmarking-strategy">Benchmarking Strategy</h3>
+<pre><code class="language-go">// Benchmark suite covering different workloads
+var benchmarks = []struct {
+    name string
+    program []uint8
+}{
+    {&quot;GameLoop&quot;, gameLoopProgram},        // Typical game patterns
+    {&quot;Arithmetic&quot;, arithmeticProgram},    // ALU-heavy
+    {&quot;Memory&quot;, memoryProgram},            // LD/LDI/LDIR heavy
+    {&quot;Control&quot;, controlFlowProgram},      // JP/CALL/RET heavy
+    {&quot;Interrupt&quot;, interruptProgram},      // EI/DI/RETI patterns
+    {&quot;Z80Specific&quot;, z80SpecificProgram}, // IX/IY/CB/ED heavy
+}
+</code></pre>
+<h2 id="maintenance-strategy">Maintenance Strategy</h2>
+<h3 id="continuous-integration">Continuous Integration</h3>
+<pre><code class="language-yaml"># .github/workflows/z80.yml
+name: Z80 Emulator CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Generate optimised decoder
+      run: make generate
+
+    - name: Run verification tests
+      run: make test
+
+    - name: Run benchmarks
+      run: make bench
+
+    - name: Check performance regression
+      run: |
+        go test -bench=. -benchmem &gt; new.txt
+        # Compare with baseline
+        go run tools/benchcmp.go baseline.txt new.txt
+
+    - name: Run ZEXALL tests
+      run: |
+        go test -run TestZEXALL
+        go test -tags=optimised -run TestZEXALL
+</code></pre>
+<h3 id="documentation-generation">Documentation Generation</h3>
+<p>Generate documentation from the instruction database:</p>
+<pre><code class="language-go">//go:generate go run tools/gen_docs.go
+
+// Creates:
+// - INSTRUCTIONS.md (full instruction reference)
+// - OPCODES.html (interactive opcode map)
+// - TIMING.md (cycle-accurate timing reference)
+</code></pre>
+<h2 id="migration-plan">Migration Plan</h2>
+<h3 id="week-1-foundation">Week 1: Foundation</h3>
+<ul>
+<li>[ ] Create instruction database (YAML)</li>
+<li>[ ] Basic generator framework</li>
+<li>[ ] Verification test suite</li>
+</ul>
+<h3 id="week-2-implementation">Week 2: Implementation</h3>
+<ul>
+<li>[ ] Generate flat switch decoder</li>
+<li>[ ] Add inlining optimisations</li>
+<li>[ ] Profile and optimise hot paths</li>
+</ul>
+<h3 id="week-3-integration">Week 3: Integration</h3>
+<ul>
+<li>[ ] Build system integration</li>
+<li>[ ] CI/CD pipeline</li>
+<li>[ ] Performance regression tests</li>
+</ul>
+<h3 id="week-4-polish">Week 4: Polish</h3>
+<ul>
+<li>[ ] Documentation generation</li>
+<li>[ ] Performance tuning</li>
+<li>[ ] Final benchmarking</li>
+</ul>
+<h2 id="tools-and-resources">Tools and Resources</h2>
+<h3 id="required-tools">Required Tools</h3>
+<ul>
+<li><code>go generate</code> - Built into Go</li>
+<li><code>gopkg.in/yaml.v3</code> - YAML parsing</li>
+<li><code>go test -bench</code> - Benchmarking</li>
+<li><code>go tool pprof</code> - Profiling</li>
+</ul>
+<h3 id="optional-tools">Optional Tools</h3>
+<ul>
+<li><code>benchstat</code> - Statistical analysis of benchmarks</li>
+<li><code>perf</code> (Linux) - CPU-level profiling</li>
+<li><code>go-torch</code> - Flame graphs</li>
+</ul>
+<h2 id="conclusion">Conclusion</h2>
+<p>This approach gives us the best of both worlds:</p>
+<ol>
+<li><strong>Maintainable source code</strong> - The YAML database and readable implementation</li>
+<li><strong>Maximum performance</strong> - Generated code with all optimisations</li>
+<li><strong>Verification</strong> - Automated testing ensures correctness</li>
+<li><strong>Flexibility</strong> - Easy to tune optimisation levels</li>
+</ol>
+<p>The investment in the generation framework (approximately 2 weeks) will pay off through:
+- 30-40% performance improvement
+- Easier maintenance (single source of truth)
+- Better documentation (generated from database)
+- Confidence in correctness (differential testing)</p>
+<p>This positions zen80 as both an educational reference implementation AND a high-performance production emulator.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

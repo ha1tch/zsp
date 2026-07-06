@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zenimate — intro guide · zenimate — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-cyan);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenimate</a>
+<article class="doc-body">
+<h1 id="zenimate-intro-guide">zenimate — intro guide</h1>
+<p>A fuller tour of zenimate than the README: how to build it, how to drive the
+GUI, the file formats it reads and writes, and how the code is layered. For a
+one-paragraph overview and the quick build, see the <a href="../README.md">README</a>.</p>
+<h2 id="building">Building</h2>
+<pre><code>make            # show all targets
+make build      # the GUI into dist/
+make build-gui  # raylib frontend, cgo-free (purego) — no system GL headers needed
+</code></pre>
+<p>The GUI links raylib. The default <code>build-gui</code> target uses raylib-go's <strong>purego</strong>
+path, which is cgo-free and builds anywhere. For the normal desktop runtime path
+you can instead build with cgo:</p>
+<pre><code>make build-gui-cgo
+</code></pre>
+<p>which needs the system development libraries raylib expects. On Debian/Ubuntu:</p>
+<pre><code>sudo apt-get install libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev \
+                     libxinerama-dev libxi-dev libxxf86vm-dev libwayland-dev \
+                     libxkbcommon-dev
+</code></pre>
+<p>Requirements: Go 1.25 or later. The GUI at runtime needs an OpenGL-capable
+display; building it does not.</p>
+<h2 id="controls">Controls</h2>
+<p>Left-drag paints, right-drag erases. Panning uses <strong>space as a modifier</strong> (hold
+space and left-drag) or a <strong>middle-mouse-button drag</strong>; either pans the viewport.
+The <strong>mouse wheel zooms</strong> in and out toward the cursor. Both zoom and pan carry
+glide-after-release inertia. <strong>Enter</strong> toggles play/stop; <code>[</code> <code>]</code> and <code>1</code>..<code>9</code>
+change frame. Esc does not close the window.</p>
+<p>The frame strip runs along the top, with a <strong>scrubber slider</strong> above it (drag to
+move between frames) and <strong><code>-</code> / <code>+</code> buttons</strong> to add or remove frames (1–16).
+<strong>Right-click</strong> a frame button for its context menu (Insert empty frame,
+Duplicate frame, Copy frame, Paste frame, Insert and paste, Delete frame); items
+disable themselves at the frame-count bounds and when the clipboard is empty.
+<strong>Press and hold, then drag</strong> a frame button past a small movement threshold to
+reorder it: a pulsating badge follows the pointer and an insertion line shows
+where it will land; release inside the strip to drop, or press Escape to cancel.
+The bottom buttons include <strong>32x24</strong> (the full 32×24-cell screen) and <strong>2x2</strong>
+size presets, per-cell <strong>width/height steppers</strong> (±1 cell each way), reset,
+play/stop, and separate <strong>copy</strong> and <strong>paste</strong> frame buttons. Sizing is
+<strong>non-destructive</strong> — existing pixels and attributes are preserved — and the
+viewport animates to fit the whole sprite when the size changes. Sprites can be
+any size up to 32×24 character cells (256×192 px).</p>
+<p>Three <strong>view modes</strong> sit in a row under the frame strip:</p>
+<ul>
+<li><strong>Bitmap Black</strong> — set pixels drawn black; clear pixels show the transparency
+  chequer (one chequer square per virtual pixel).</li>
+<li><strong>Bitmap White</strong> — set pixels drawn white; clear pixels show the chequer.</li>
+<li><strong>Spectrum Colour</strong> — uses ZX attributes: set pixels show the cell's ink
+  colour, clear pixels its paper colour. A vertical <strong>16-swatch palette</strong> (8
+  colours × normal/bright) appears: <strong>left-click</strong> a swatch to pick ink,
+  <strong>right-click</strong> to pick paper. <strong>Hold Ctrl (or Option) and paint</strong> to stamp
+  the current ink/paper/bright onto a cell (painting without the modifier only
+  edits the bitmap). A faint per-virtual-pixel grid shows at ≥50% zoom.
+  Attributes are per 8×8 character cell (hardware-accurate) and <strong>per frame</strong>;
+  copy/paste-frame carries them.</li>
+</ul>
+<p>Four <strong>transform</strong> buttons act on the selected frame: <strong>H FLIP</strong> and <strong>V
+FLIP</strong> mirror pixels and per-cell colour together; <strong>ROT 90</strong> rotates
+clockwise in place, or — holding <strong>Ctrl or Option</strong> — also swaps a non-square
+frame's dimensions so nothing is clipped; <strong>INVERT</strong> flips every pixel
+(colour is untouched).</p>
+<p>In the bitmap views, two <strong>onion-skin</strong> toggles overlay neighbouring frames as
+translucent silhouettes: the previous frame in red, the next in green (wrapping
+at the ends). Each toggles independently; onion skins are not shown in Spectrum
+Colour mode.</p>
+<p>The frame strip and the view-mode/onion toolbars sit to the right of the title
+block, across the top, using the available width. Clicking the title collapses
+it to a small button (freeing horizontal space for the toolbars); clicking the
+button restores it. Keeping the toolbars on the top band leaves the viewport
+more vertical room.</p>
+<p>The window is resizable: the editor cell size adapts so the whole grid stays
+visible at any window or sprite size, with dark-grey guide lines on the ZX 8×8
+character-cell boundaries.</p>
+<p>The <strong>preview</strong> is a fixed-size box (top-right) that shows the sprite at a fixed
+integer zoom (×1–×4, where ×N draws each sprite pixel as an N×N square),
+centred on the cursor's pixel while you hover the paint area, otherwise on the
+last pixel you edited. <strong>Right-click</strong> the preview to cycle the zoom. <strong>Press and
+hold</strong> (left button) to unfurl a full-sprite popup that grows out of the preview
+box — anchored to its top-right corner — and shrinks back on release.</p>
+<p><strong>Undo and redo</strong> cover painting, transforms, resizing, and frame changes (add,
+remove, insert, duplicate, move, clear, reset, paste) up to 100 levels back — a
+whole paint stroke counts as one action, however many pixels it touches.</p>
+<p>File operations sit on the bottom button row and on shortcuts: <strong>Ctrl+O</strong> opens
+(a sprite, animation, screen, image, or a bundle to browse into); <strong>Ctrl+S</strong>
+saves back to the current source; <strong>Ctrl+Shift+S</strong> is Save As; <strong>Ctrl+E</strong> exports
+the current frame to a Spectrum format; <strong>Ctrl+Shift+E</strong> adds the sprite to a
+bundle; <strong>Ctrl+F</strong> toggles the save-extension form between long (<code>.zani</code>/<code>.zbun</code>)
+and 8.3 (<code>.zan</code>/<code>.zbu</code>); <strong>Ctrl+Z</strong> undoes, <strong>Ctrl+Shift+Z</strong> redoes;
+<strong>Ctrl+C</strong>/<strong>Ctrl+V</strong> copy/paste the selected frame. On macOS, <strong>Cmd</strong> works
+wherever <strong>Ctrl</strong> is shown for all of the above. Files can also be <strong>dragged
+onto the window</strong>: a sprite, animation, screen or image loads directly, and a
+dropped bundle opens the browser so you can pick an animation. The title block
+shows the current source (<code>name.zani</code>, <code>name - bundle.zbun</code>, or <code>name
+(unsaved)</code>) so it is always clear what Save will write to.</p>
+<p>The <strong>HELP</strong> button (or <strong>F1</strong>) opens a scrollable reader listing all the
+shortcuts and explaining the file formats; scroll with the wheel, arrows,
+PgUp/PgDn or Home/End, and close it with Esc or the close box.</p>
+<h2 id="files-and-formats">Files and formats</h2>
+<p>zenimate reads and writes these file types:</p>
+<ul>
+<li><strong><code>.zani</code></strong> (or <strong><code>.zan</code></strong> on 8.3 filesystems) — a single animated sprite: all
+  of its frames, with per-cell attributes. The bytes are the ZCUT format, so a
+  <code>.zani</code> is interchangeable with the wider toolchain and a raw <code>.zcut</code> is still
+  accepted on open.</li>
+<li><strong><code>.zbun</code></strong> (or <strong><code>.zbu</code></strong> on 8.3) — a bundle: a zip gathering several <code>.zani</code>
+  animations plus a <code>manifest.json</code> index (name, frame count, dimensions and a
+  free-text label per animation). Use a bundle to keep, say, all of a game's
+  sprites in one file. The Open dialog can browse into a bundle and preview each
+  animation before opening it; the Bundle action adds the current sprite to a new
+  or existing bundle.</li>
+</ul>
+<p>Which extension form is written — long (<code>.zani</code>/<code>.zbun</code>) or 8.3 (<code>.zan</code>/<code>.zbu</code>) —
+is a setting, toggled with <strong>Ctrl+F</strong>. Loading always accepts every form.</p>
+<p>zenimate can also <strong>import</strong> a raw screen (<code>.scr</code>), pull a loading screen out of
+a tape (<code>.tap</code>/<code>.tzx</code>) or snapshot (<code>.sna</code>/<code>.z80</code>), and reduce a raster image
+(JPEG/PNG/GIF) to a Spectrum screen with a chosen fit strategy. Any of these can
+be opened from the dialog or dropped onto the window.</p>
+<p><strong>Save vs Save As.</strong> <strong>Ctrl+S</strong> saves back to wherever the sprite came from: a
+file is overwritten in place; a sprite opened from a bundle asks (once) whether
+to update it inside that bundle or split it off as a separate <code>.zani</code>; a brand
+new sprite prompts for a destination. <strong>Ctrl+Shift+S</strong> is Save As and always
+prompts. The title block shows the current source so it is always clear what Save
+will write to.</p>
+<h2 id="design">Design</h2>
+<pre><code>pkg/bdf          standalone BDF font reader + rasteriser (no project deps)
+pkg/zxpalette    ZX Spectrum palette + attribute encoding (cloned from zenzx)
+pkg/zenui        renderer-agnostic UI toolkit (stdlib only): the file dialog,
+                 the frame context menu, and every chooser modal share one
+                 Renderer/Input contract and one Status lifecycle
+pkg/version      build version, synced from VERSION
+internal/fonts   embedded Sinclair + Cozette faces (decoded via pkg/bdf)
+internal/model   the sprite document: variable frames, dims, per-frame
+                 per-cell attributes, edits, observer hook
+internal/ui      the frontend-independent controller
+cmd/zenimate-gui raylib frontend (text via pkg/bdf only)
+</code></pre>
+<p><code>pkg/bdf</code> is the reusable BDF font system: it was lifted from the subterm
+terminal renderer and stripped of its buffer/registry coupling so it stands
+alone. The GUI proves the "reuse the BDF system" intent end to end — it asks
+<code>pkg/bdf</code> to rasterise each glyph of the Sinclair face, uploads those pixmaps as
+raylib textures, and blits strings cell by cell.</p>
+<h2 id="continuous-integration-and-releases">Continuous integration and releases</h2>
+<p>GitHub Actions builds, vets, and tests on every push and pull request. Because
+the GUI uses raylib-go's cgo-free purego path, every binary cross-compiles from a
+single Linux runner with no per-platform toolchains.</p>
+<p>Pushing a <code>v*</code> tag (for example <code>v0.6.1</code>) triggers the release workflow, which
+cross-compiles the GUI for each platform, bundles it, and publishes a GitHub
+Release with the archives attached. Release platforms:</p>
+<ul>
+<li>Linux amd64 and arm64 (arm64 covers 64-bit Raspberry Pi OS on the Pi 3B and
+  later; the purego GUI has no 32-bit ARM support)</li>
+<li>macOS amd64 (Intel) and arm64 (Apple Silicon)</li>
+<li>Windows amd64</li>
+</ul>
+<p>Dependencies are ordinary published modules fetched from the Go proxy at build
+time (the UI toolkit lives in-tree at <code>pkg/zenui</code>), so CI needs no vendored
+tree. The release version is taken from the tag and written through the
+<code>VERSION</code> file and <code>scripts/syncver.sh</code>, keeping the compiled-in version
+consistent with the tag.</p>
+<p>Note: the purego GUI embeds the raylib runtime for its target platform inside
+the compiled binary at build time and extracts it to a local cache on first
+run, rather than loading a separate system-installed raylib library — a
+released binary needs no additional runtime install beyond the OS's own
+graphics stack (X11/GLX and a GL implementation on Linux; the equivalent is
+already present on macOS and Windows).</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

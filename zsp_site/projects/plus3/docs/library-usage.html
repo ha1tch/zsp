@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Using the diskimg package from your own Go programs · plus3 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-yellow);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to plus3</a>
+<article class="doc-body">
+<h1 id="using-the-diskimg-package-from-your-own-go-programs">Using the <code>diskimg</code> package from your own Go programs</h1>
+<p><code>github.com/ha1tch/plus3/pkg/diskimg</code> is the library that backs the <code>plus3</code>
+command-line tool. It can be embedded directly in other Go programs that need to
+read or write +3DOS disk images -- an emulator loading a disk, an assembler writing
+its output straight onto an image, a build tool packaging a release, and so on.</p>
+<p>This guide is the consumer-facing companion to the API. For the format itself and
+its pitfalls, see <a href="plus3dos-pitfalls.html"><code>PLUS3DOS-PITFALLS.md</code></a>; this document is
+about the Go API.</p>
+<pre><code class="language-go">import &quot;github.com/ha1tch/plus3/pkg/diskimg&quot;
+</code></pre>
+<p>Requires Go 1.25 or later.</p>
+<hr />
+<h2 id="maturity-which-paths-are-proven">Maturity: which paths are proven</h2>
+<p>The package exposes more than the command-line tool uses. To set expectations
+honestly:</p>
+<ul>
+<li><strong>Proven</strong> -- exercised by the CLI and covered by tests, and verified against real
+  +3 hardware: creating an image, importing CODE and BASIC files, listing the
+  directory, exporting files byte-exactly, deleting files, detokenising BASIC, and
+  raw sector read/write. Build on these with confidence.</li>
+<li><strong>Present but less travelled</strong> -- screen import/export has not had the same
+  hardware verification; treat it as a usable starting point, not a settled
+  contract, and test against real targets before relying on it. TAP&lt;-&gt;disk
+  conversion now delegates to github.com/ha1tch/zentools (pkg/tap) for encoding
+  and decoding, which is validated against independent tools and real files, and
+  has round-trip tests in pkg/diskimg.</li>
+</ul>
+<p>When in doubt, the rule that governed the whole project applies: verify against a
+real disk or a real machine, because a reader and writer that share an assumption
+will agree with each other even when both are wrong.</p>
+<hr />
+<h2 id="the-core-type-diskimage">The core type: <code>DiskImage</code></h2>
+<p>A <code>*DiskImage</code> is the in-memory handle for one disk image. You obtain one in one of
+three ways:</p>
+<pre><code class="language-go">di := diskimg.NewDiskImage()                       // a fresh, formatted blank disk
+di, err := diskimg.LoadFromFile(&quot;game.dsk&quot;)        // load from a path
+di, err := diskimg.Load(reader)                    // load from any io.Reader
+</code></pre>
+<p><code>NewDiskImage</code> returns a fully formatted single-sided +3 image (every track has a
+track-information block and 0xE5-filled sectors, and the directory area is
+initialised). You can import files into it immediately.</p>
+<p>Changes are in memory until you write them out:</p>
+<pre><code class="language-go">err := di.SaveToFile(&quot;game.dsk&quot;)                   // write to a path
+err := di.Save(writer)                             // write to any io.Writer
+</code></pre>
+<p><code>Save</code> flushes the in-memory directory to its sectors before writing, so you do not
+need to call <code>FlushDirectory</code> yourself in the normal path.</p>
+<hr />
+<h2 id="common-tasks">Common tasks</h2>
+<h3 id="create-a-disk-and-add-a-machine-code-file">Create a disk and add a machine-code file</h3>
+<p>This is the most common path for an assembler or build tool: take a binary, write it
+onto a disk as a CODE file with a correct PLUS3DOS header.</p>
+<pre><code class="language-go">di := diskimg.NewDiskImage()
+
+// Import a host file as a CODE file with the given load address.
+// The on-disk name is derived from the host filename (first 8 chars + &quot;.BIN&quot;).
+if err := di.ImportCode(&quot;build/game.bin&quot;, 0x8000); err != nil {
+    return err
+}
+
+if err := di.SaveToFile(&quot;game.dsk&quot;); err != nil {
+    return err
+}
+</code></pre>
+<p>The resulting file has file type 3 (CODE), the load address in the first header
+parameter, and the conventions a real +3 expects (see the pitfalls document for why
+those details matter).</p>
+<h3 id="add-a-basic-program">Add a BASIC program</h3>
+<pre><code class="language-go">// line is the auto-run line number, or 0x8000 for &quot;no auto-run&quot;.
+err := di.ImportBasicProgram(&quot;loader.bas&quot;, 10)
+</code></pre>
+<p>This imports an <strong>already-tokenised</strong> BASIC file. To import plain-text BASIC
+source and have it tokenised on the way in, use <code>ImportBasicText</code>:</p>
+<pre><code class="language-go">err := di.ImportBasicText(&quot;loader.txt&quot;, 10) // tokenises, then stores
+</code></pre>
+<p>Or tokenise in memory directly with <code>TokeniseBasic</code> (the inverse of
+<code>DetokeniseBasic</code>):</p>
+<pre><code class="language-go">tok, err := diskimg.TokeniseBasic(`10 PRINT &quot;HELLO&quot;`)
+</code></pre>
+<p>The tokeniser covers keywords, integer constants (0-65535), string literals, and
+REM comments; it does not produce floating-point literals, DEF FN calculator
+slots, or embedded colour-control bytes.</p>
+<h3 id="list-the-catalogue">List the catalogue</h3>
+<p><code>GetDirectory</code> returns a snapshot slice of all 64 entries. Filter out the empty
+ones:</p>
+<pre><code class="language-go">entries, err := di.GetDirectory()
+if err != nil {
+    return err
+}
+for _, e := range entries {
+    if e.IsUnused() || e.GetFilename() == &quot;&quot; {
+        continue
+    }
+    fmt.Println(e.GetFilename())                    // e.g. &quot;GAME.BIN&quot;
+}
+</code></pre>
+<p><code>DirectoryEntry</code> is read via its methods: <code>GetFilename()</code> (the 8.3 name),
+<code>IsUnused()</code>, <code>IsDeleted()</code>, and <code>GetAttributes()</code> (read-only / hidden / system).
+The raw fields (<code>Status</code>, <code>RecordCount</code>, <code>AllocationBlocks</code>) are also exported if you
+need them, but prefer the methods.</p>
+<p>The returned slice is a copy; mutating it does not change the disk. Use the
+<code>DiskImage</code> methods (<code>ImportCode</code>, <code>DeleteFile</code>, ...) to modify the image.</p>
+<h3 id="extract-a-file-back-to-the-host">Extract a file back to the host</h3>
+<pre><code class="language-go">// stripHeader removes the 128-byte PLUS3DOS header so you get just the data.
+// The second argument is a host FILE path (the file is created), not a directory.
+err := di.ExportFile(&quot;GAME.BIN&quot;, &quot;outfile.bin&quot;, true)
+</code></pre>
+<p>Extraction uses the PLUS3DOS header's length field, so it is byte-exact rather than
+rounded to the record size.</p>
+<h3 id="detokenise-a-basic-program-to-text">Detokenise a BASIC program to text</h3>
+<pre><code class="language-go">text, err := di.ReadBasicText(&quot;LOADER.BAS&quot;)        // reads + detokenises in one call
+fmt.Print(text)
+</code></pre>
+<p>Or, if you already have the raw (header-stripped) program bytes in memory -- for
+example bytes you read some other way -- call the decoder directly:</p>
+<pre><code class="language-go">text, err := diskimg.DetokeniseBasic(programBytes)
+</code></pre>
+<p><code>DetokeniseBasic</code> handles keyword tokens (including the 128K <code>PLAY</code> and <code>SPECTRUM</code>),
+numeric constants (skipping the hidden 5-byte binary form), strings, and statement
+separators. It does not fully reconstruct embedded colour-control argument bytes.</p>
+<h3 id="delete-a-file">Delete a file</h3>
+<pre><code class="language-go">err := di.DeleteFile(&quot;GAME.BIN&quot;)                   // frees blocks, flushes directory
+</code></pre>
+<hr />
+<h2 id="lower-level-access-sectors-and-the-file-handle">Lower-level access: sectors and the File handle</h2>
+<p>Two lower-level surfaces are available when the file-level API is not enough.</p>
+<h3 id="raw-sector-io">Raw sector I/O</h3>
+<p>Direct sector read/write, addressed by track and sector. Sectors are 512 bytes;
+sector indices passed here are 0-based within the track. This is what an emulator's
+FDC layer would sit on top of.</p>
+<pre><code class="language-go">data, err := di.GetSectorData(track, sector, side) // returns 512 bytes
+err = di.SetSectorData(track, sector, side, data)  // data must be 512 bytes
+</code></pre>
+<p>For the geometry (track 0 reserved, directory on track 1, the block-to-sector
+mapping), see the pitfalls document -- those rules matter if you compute sector
+addresses yourself.</p>
+<h3 id="streaming-file-access-with-file">Streaming file access with <code>*File</code></h3>
+<p><code>OpenFile</code> returns a <code>*File</code> that implements the standard <code>io</code> interfaces
+(<code>io.Reader</code>, <code>io.Writer</code>, <code>io.Seeker</code>, plus <code>ReaderAt</code>/<code>WriterAt</code>), so you can
+stream rather than load whole files:</p>
+<pre><code class="language-go">f, err := di.OpenFile(&quot;GAME.BIN&quot;, false)           // false = must already exist
+if err != nil {
+    return err
+}
+defer f.Close()
+
+buf := make([]byte, 256)
+n, err := f.Read(buf)
+</code></pre>
+<p>Pass <code>createNew = true</code> to create the file if it does not exist. After writing,
+<code>Close</code> updates the directory entry. Remember to <code>SaveToFile</code> / <code>Save</code> afterwards to
+persist the image.</p>
+<hr />
+<h2 id="validation">Validation</h2>
+<pre><code class="language-go">err := di.DiskCheck()                               // structural sanity check
+ok  := di.IsPlus3Format()                           // is this the +3 format?
+</code></pre>
+<p><code>DiskCheck</code> is the same check the <code>info</code> command runs. It is a sanity check on the
+image structure, not a guarantee of +3DOS acceptance -- the only guarantee of that
+is a real +3 (which is the lesson the pitfalls document exists to pass on).</p>
+<hr />
+<h2 id="a-complete-example">A complete example</h2>
+<p>Create a disk, add a loader and a code file, and save it -- the shape an ecosystem
+build step would take:</p>
+<pre><code class="language-go">package main
+
+import (
+    &quot;log&quot;
+
+    &quot;github.com/ha1tch/plus3/pkg/diskimg&quot;
+)
+
+func main() {
+    di := diskimg.NewDiskImage()
+
+    if err := di.ImportCode(&quot;build/game.bin&quot;, 0x8000); err != nil {
+        log.Fatalf(&quot;import code: %v&quot;, err)
+    }
+    if err := di.ImportBasicProgram(&quot;build/loader.bas&quot;, 10); err != nil {
+        log.Fatalf(&quot;import loader: %v&quot;, err)
+    }
+
+    if err := di.SaveToFile(&quot;dist/game.dsk&quot;); err != nil {
+        log.Fatalf(&quot;save: %v&quot;, err)
+    }
+
+    // Confirm what landed on the image.
+    entries, _ := di.GetDirectory()
+    for _, e := range entries {
+        if !e.IsUnused() &amp;&amp; e.GetFilename() != &quot;&quot; {
+            log.Printf(&quot;on disk: %s&quot;, e.GetFilename())
+        }
+    }
+}
+</code></pre>
+<hr />
+<h2 id="notes-for-emulator-and-assembler-integration">Notes for emulator and assembler integration</h2>
+<p>A few points specific to the two most likely first consumers:</p>
+<ul>
+<li>
+<p><strong>Emulator (loading a disk):</strong> the proven read path is <code>LoadFromFile</code> -&gt;
+  <code>GetDirectory</code> -&gt; <code>ExportFile</code>/<code>OpenFile</code>, or <code>GetSectorData</code> for raw FDC-level
+  access. The reader handles both the standard (<code>MV - CPC</code>) and extended
+  (<code>EXTENDED CPC</code>) <code>.dsk</code> container variants; real disks are usually extended. The
+  writer emits the standard variant, which round-trips and is accepted by a real +3.</p>
+</li>
+<li>
+<p><strong>Assembler (writing output onto a disk):</strong> the proven write path is
+  <code>NewDiskImage</code> -&gt; <code>ImportCode</code> (or build a header and use <code>ImportFile</code> with
+  <code>ImportOptions</code>) -&gt; <code>SaveToFile</code>. If you need the CODE header parameters set a
+  particular way, <code>ImportOptions{AddHeader: true, FileType: FileTypeCode, LoadAddr:
+  addr}</code> gives you control; the package fills in the header-version and
+  second-parameter conventions a real +3 expects.</p>
+</li>
+<li>
+<p><strong>Both:</strong> the package tokenises plain-text BASIC source into the on-disk form
+  (<code>TokeniseBasic</code> / <code>ImportBasicText</code>) and detokenises the other way
+  (<code>DetokeniseBasic</code> / <code>ReadBasicText</code>). The tokeniser covers keywords, integer
+  constants, strings, and REM; it does not emit floating-point literals or DEF FN
+  calculator slots, so programs relying on those should be tokenised with a full
+  toolchain and added with <code>-t basic</code>.</p>
+</li>
+</ul>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

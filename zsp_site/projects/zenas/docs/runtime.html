@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running and testing code with zenas · zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenas</a>
+<article class="doc-body">
+<h1 id="running-and-testing-code-with-zenas">Running and testing code with zenas</h1>
+<p>zenas can execute the code it assembles, in-process, through a bundled Z80/Z80N
+emulator core. This is a capability most assemblers do not have: there is no
+separate emulator to launch and no binary to write out and load elsewhere. You
+assemble, run, and check results in a single command.</p>
+<p>Two subcommands provide this:</p>
+<ul>
+<li><code>zenas run</code> - assemble and execute, then report final state.</li>
+<li><code>zenas assert</code> - assemble, execute, and check the result against expectations,
+  exiting non-zero on failure (so it fits in a CI pipeline or a Makefile).</li>
+</ul>
+<p>This guide covers both, the execution model they share, and the assertion
+vocabulary.</p>
+<h2 id="the-execution-model">The execution model</h2>
+<p>Both subcommands work the same way up to the point of reporting:</p>
+<ol>
+<li>The source is assembled in-process.</li>
+<li>A fresh 64 KB RAM is created. Any <code>--preload</code> files are loaded first, then the
+   assembled bytes are loaded at the program's first <code>ORG</code>.</li>
+<li>The CPU registers are set to a known, zeroed state, so a given program always
+   produces the same result. (This matters: real Z80 power-on register contents
+   are undefined, which would make assertions non-reproducible.)</li>
+<li>Execution begins at the first <code>ORG</code>, or at a named routine if <code>--call</code> is
+   used.</li>
+<li>Execution stops at the first of: a <code>HALT</code> instruction, a <code>--call</code> routine
+   returning, or the instruction cap (<code>--max-steps</code>).</li>
+</ol>
+<h3 id="stopping-and-the-infinite-loop-guard">Stopping, and the infinite-loop guard</h3>
+<p>A Z80 program has no inherent end, so the stop condition is explicit:</p>
+<ul>
+<li><strong><code>HALT</code></strong> ends a whole-program run. Most test programs finish with <code>HALT</code>.</li>
+<li><strong>A returning <code>--call</code> routine</strong> ends a subroutine run (see below).</li>
+<li><strong><code>--max-steps=N</code></strong> caps the number of instructions (default 1,000,000). This
+  is the infinite-loop guard. If it trips, <code>run</code> reports it and exits with code
+  2; <code>assert</code> treats it as a test failure. Without this, a buggy program would
+  hang the command instead of reporting.</li>
+</ul>
+<h2 id="zenas-run"><code>zenas run</code></h2>
+<pre><code>zenas run &lt;file&gt; [options]
+</code></pre>
+<p>Assembles and runs the program, then prints the final register and flag state
+(and optionally a memory dump). Example:</p>
+<pre><code>zenas run game.asm
+</code></pre>
+<pre><code>Halted after 5 instructions (29 cycles).
+  A=00  F=00 [--------]   AF=0000
+  BC=0000  DE=0000  HL=0000
+  IX=0000  IY=0000  SP=FFFF  PC=8008
+  AF_=1100  BC_=2233  DE_=0000  HL_=0000
+</code></pre>
+<p>The flag field shows the F register as <code>SZ5H3PNC</code>, with a dash where a flag is
+clear. <code>AF_</code> <code>BC_</code> <code>DE_</code> <code>HL_</code> are the alternate (shadow) register pairs.</p>
+<h3 id="watching-execution-trace">Watching execution: <code>--trace</code></h3>
+<p><code>--trace</code> prints each instruction as it runs - program counter, opcode, and the
+accumulator and HL after the step. It is the quickest way to see where a program
+spins if it never reaches <code>HALT</code>:</p>
+<pre><code>zenas run loop.asm --trace --max-steps=20
+</code></pre>
+<pre><code>Trace:
+      0  PC=8000  op=3E  A=00  HL=0000
+      1  PC=8002  op=06  A=00  HL=0000
+      2  PC=8004  op=80  A=05  HL=0000
+      ...
+</code></pre>
+<h3 id="loading-data-preload">Loading data: <code>--preload</code></h3>
+<p><code>--preload=ADDR,FILE</code> loads a binary file into memory before execution. It is
+repeatable, so a program can be run with the screen, sprite data, or other
+assets it expects already in place:</p>
+<pre><code>zenas run game.asm --preload=0xC000,sprites.bin --preload=16384,title.scr
+</code></pre>
+<p>Addresses may be decimal or hexadecimal (<code>0x...</code>, <code>$...</code>, or a trailing <code>h</code>).
+Preloads are loaded before the assembled program, so if regions overlap the
+program wins.</p>
+<h3 id="dumping-memory-hex-and-dump">Dumping memory: <code>--hex</code> and <code>--dump</code></h3>
+<p><code>--hex</code> dumps the assembled region after the run. <code>--dump=START:LEN</code> dumps an
+arbitrary region (and implies <code>--hex</code>):</p>
+<pre><code>zenas run sort.asm --dump=0xC000:16
+</code></pre>
+<h3 id="structured-output-json">Structured output: <code>--json</code></h3>
+<p><code>--json[=level]</code> emits the result as JSON instead of the human-readable block,
+with the same level names used elsewhere in zenas:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>basic</code></td>
+<td>Outcome, step count, core registers</td>
+</tr>
+<tr>
+<td><code>standard</code></td>
+<td>Adds flags and cycle count (the default for <code>--json</code>)</td>
+</tr>
+<tr>
+<td><code>detailed</code></td>
+<td>Adds the memory window (if <code>--hex</code>/<code>--dump</code> used)</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td>Adds the full per-instruction trace (if <code>--trace</code> used)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="zenas-assert"><code>zenas assert</code></h2>
+<pre><code>zenas assert &lt;file&gt; --expect &quot;&lt;checks&gt;&quot; [options]
+</code></pre>
+<p>Runs the program exactly as <code>zenas run</code> does, then checks the final state against
+a comma-separated list of expectations. Each check prints <code>PASS</code> or <code>FAIL</code>; the
+command exits 0 only if every check passes, and 1 otherwise. A run that hits the
+instruction cap fails as well, with a clear message - an infinite loop is a
+failed test, not a hang.</p>
+<pre><code>zenas assert math.asm --call=multiply --expect=&quot;A=0x0C,CF=0&quot;
+</code></pre>
+<pre><code>PASS  A=0x0C
+PASS  CF=0
+</code></pre>
+<h3 id="calling-a-routine-call">Calling a routine: <code>--call</code></h3>
+<p><code>--call=&lt;label&gt;</code> runs a single subroutine rather than the whole program. zenas
+pushes a return address, sets the program counter to the label, and stops when
+the routine returns. This is the natural unit to test: set up inputs, call the
+routine, assert its outputs.</p>
+<pre><code>zenas assert routines.asm --call=to_uppercase --expect=&quot;A=0x41&quot;
+</code></pre>
+<h3 id="the-expectation-vocabulary">The expectation vocabulary</h3>
+<p><code>--expect</code> takes a comma-separated list. Three kinds of check are available.</p>
+<p><strong>Registers.</strong> 8-bit: <code>A</code> <code>F</code> <code>B</code> <code>C</code> <code>D</code> <code>E</code> <code>H</code> <code>L</code>. 16-bit pairs: <code>AF</code> <code>BC</code>
+<code>DE</code> <code>HL</code> <code>IX</code> <code>IY</code> <code>SP</code> <code>PC</code>. Shadow pairs: <code>AF_</code> <code>BC_</code> <code>DE_</code> <code>HL_</code>. Values may
+be decimal or hexadecimal.</p>
+<pre><code>--expect=&quot;A=0x42,HL=0x8000,SP=65000&quot;
+</code></pre>
+<p><strong>Flags.</strong> Written with an <code>F</code> suffix to avoid clashing with the register names
+<code>C</code> and <code>H</code>: <code>CF</code> (carry), <code>ZF</code> (zero), <code>SF</code> (sign), <code>HF</code> (half-carry), <code>PF</code>
+(parity/overflow), <code>NF</code> (add/subtract). The value is <code>0</code> or <code>1</code>.</p>
+<pre><code>--expect=&quot;ZF=1,CF=0&quot;
+</code></pre>
+<p><strong>Memory.</strong> <code>(ADDR)=VALUE</code> checks a single byte at an address. <code>ADDR</code> may be a
+numeric address or a symbol name (a label or variable), resolved against the
+assembled program:</p>
+<pre><code>--expect=&quot;(0xC000)=0xAB&quot;
+--expect=&quot;(total)=42&quot;
+</code></pre>
+<p>A note on <code>AF</code>: the low byte of <code>AF</code> is the flags register, which includes the
+undocumented bits 3 and 5. Asserting an exact <code>AF</code> value is therefore more
+brittle than asserting <code>A</code> together with the specific flags you care about
+(<code>CF</code>, <code>ZF</code>, ...). Prefer the latter where you can.</p>
+<h3 id="example-testing-a-routine">Example: testing a routine</h3>
+<p>A routine that doubles the accumulator, and a check that it sets the carry flag
+on overflow:</p>
+<pre><code>        ORG $8000
+        HALT                ; whole-program entry (unused here)
+
+double: ADD A, A
+        RET
+</code></pre>
+<pre><code>zenas assert double.asm --call=double --expect=&quot;A=0x00,CF=1&quot;
+</code></pre>
+<p>(With the accumulator starting at zero this particular check would not exercise
+the overflow; in practice a test harness sets inputs first - see below.)</p>
+<h3 id="setting-inputs">Setting inputs</h3>
+<p>Because registers start zeroed, a routine that operates on inputs needs those
+inputs established first. The straightforward pattern is a small wrapper routine
+in the source that loads the inputs and then falls through or calls the routine
+under test, and to <code>--call</code> the wrapper:</p>
+<pre><code>        ORG $8000
+        HALT
+
+test_double_7:
+        LD A, 7
+        CALL double
+        RET
+
+double: ADD A, A
+        RET
+</code></pre>
+<pre><code>zenas assert double.asm --call=test_double_7 --expect=&quot;A=0x0E&quot;
+</code></pre>
+<h2 id="test-files-the-go-style-layer">Test files (the Go-style layer)</h2>
+<p>The wrapper-routine convention above is the basis for file-level testing,
+analogous to Go's <code>_test.go</code> files. A test file is named <code>*_test.asm</code>, includes
+the program under test, and defines test routines each annotated with an
+<code>.EXPECT</code> directive stating the expected post-conditions:</p>
+<pre><code>        ORG $8000
+        INCLUDE &quot;game.asm&quot;
+
+test_double_7:
+        LD A, 7
+        CALL double
+        RET
+.EXPECT A=0x0E
+
+test_add10:
+        LD A, 5
+        CALL add10
+        RET
+.EXPECT A=15
+</code></pre>
+<p>Running <code>zenas assert game_test.asm</code> (with no <code>--expect</code>) discovers every
+<code>.EXPECT</code>-annotated routine, runs each via its label, checks its expectations,
+and reports go-test-style results:</p>
+<pre><code>PASS  test_double_7
+PASS  test_add10
+
+2 passed, 0 failed
+</code></pre>
+<p>The command exits non-zero if any test fails, so it drops into a Makefile or CI
+step directly.</p>
+<p><code>.EXPECT</code> is only permitted in a file whose name ends in <code>_test.asm</code>; using it
+anywhere else is an assembly error. This guarantees that test expectations can
+never appear in a production build - the rule is enforced by the assembler, not
+by convention. <code>.EXPECT</code> binds to the nearest preceding label and emits no
+bytes. The expectation syntax is exactly the <code>--expect</code> vocabulary above
+(registers, flags, and memory).</p>
+<h3 id="matching-memory-spans-with-match">Matching memory spans with <code>.MATCH</code></h3>
+<p><code>.EXPECT</code> checks one byte at a time. To assert that a whole span of memory holds
+expected bytes - the natural test for a routine that writes a buffer, a sprite,
+or a table - use <code>.MATCH</code>:</p>
+<pre><code>.MATCH &lt;location&gt;, &lt;data&gt;
+</code></pre>
+<p>The location is an address or a symbol; the data is an ordinary <code>.DB</code>/<code>.DW</code>/<code>.DM</code>
+directive, assembled through the normal data path and compared against memory
+after the test runs:</p>
+<pre><code>test_fill_marker:
+        CALL fill_marker
+        RET
+.MATCH marker_buffer, .db 0x600DF00D
+</code></pre>
+<p>This asserts that the four bytes at <code>marker_buffer</code> are <code>60 0D F0 0D</code>. Because
+the data part is a real data directive, every data form works, including the
+radix-input forms:</p>
+<pre><code>.MATCH 0xC000, .db 0x 60 0D F0 0D      ; spaced hex
+.MATCH 0xC000, .dw 0x 600D F00D        ; words, little-endian
+.MATCH 0xC000, .db 0d 96 13 240 13     ; decimal
+</code></pre>
+<p>On failure, <code>.MATCH</code> reports the first differing offset, for example
+<code>.MATCH at marker_buffer+2: expected 0xF0, got 0x00</code>. Like <code>.EXPECT</code>, <code>.MATCH</code> is
+only allowed in a <code>*_test.asm</code> file. A test routine may carry any number of
+<code>.EXPECT</code> and <code>.MATCH</code> directives; they are all checked together as one test.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>run</code> completed; or <code>assert</code> and all checks passed</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Assembly error, bad arguments, or an <code>assert</code> check failed</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>run</code> reached the instruction cap (possible infinite loop)</td>
+</tr>
+</tbody>
+</table>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

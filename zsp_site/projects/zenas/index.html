@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../index.html#projects">Projects</a>
+<a href="../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<section class="project-hero"><div class="wrap">
+<a class="back" href="../../index.html#projects">&larr; all projects</a>
+<h1>zenas</h1>
+<p class="zx-subtitle">An assembler that runs what it assembles</p>
+<p class="desc">A Z80 and Z80N macro assembler written in Go that can also execute and test the code it assembles. Assembles source to raw machine code, packages it into runnable tapes and snapshots, or runs it in a built-in Z80 emulator and asserts on the result.</p>
+<div class="meta-row">
+<span class="pill">v0.7.5</span>
+<a href="https://github.com/ha1tch/zenas">github.com/ha1tch/zenas &rarr;</a>
+</div>
+</div></section>
+
+<section class="section"><div class="wrap">
+<p class="section-label">Documentation</p>
+<div class="docs-list">
+<a class="doc-row" href="docs/manual.html">
+<div><p class="doc-title">zenas manual</p><p class="doc-excerpt">zenas is a two-pass Z80 / Z80N assembler. This manual is the reference for the command line, the source language, the directives, and the extensions. For the…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/zenas-programming.html">
+<div><p class="doc-title">Zenas programming</p><p class="doc-excerpt">This guide is for someone who already knows Z80 assembly and another assembler — pasmo, sjasmplus, z80asm — and wants to understand how zenas fits their hands. It is in…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/zenas-design.html">
+<div><p class="doc-title">The logic of zenas</p><p class="doc-excerpt">If you read the zenas manual as a catalogue of features, some entries look eccentric. An assembler with a C-flavoured macro syntax that has no if, no loops, and no…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/instruction-set.html">
+<div><p class="doc-title">Z80 instruction-set coverage</p><p class="doc-excerpt">zenas covers three classes of instructions, verified by encoding a representative of every instruction family and comparing the bytes against established reference…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/z80n-reference.html">
+<div><p class="doc-title">Z80N (ZX Spectrum Next) instruction reference</p><p class="doc-excerpt">Z80N (ZX Spectrum Next) instruction reference</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/runtime.html">
+<div><p class="doc-title">Running and testing code with zenas</p><p class="doc-excerpt">zenas can execute the code it assembles, in-process, through a bundled Z80/Z80N emulator core. This is a capability most assemblers do not have: there is no separate…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/dialect-compatibility.html">
+<div><p class="doc-title">Dialect compatibility reference</p><p class="doc-excerpt">This document records the measured state of zenas's compatibility with pasmo and sjasmplus source, and explains what each non-zenas construct does. It exists so the…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/seam-comparison.html">
+<div><p class="doc-title">Reproducing the seam on other assemblers</p><p class="doc-excerpt">The design rationale describes the seam: a typed linkage layer — width-checked signatures, calls, assignment, namespaced packages — built natively into the assembler. A…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a><a class="doc-row" href="docs/packaged-program-tutorial.html">
+<div><p class="doc-title">Building and testing a packaged program</p><p class="doc-excerpt">This is a hands-on walkthrough. We build a small but real program — a sprite-row compositor that writes graphics bytes into a buffer — using zenas packages to organise…</p></div>
+<span class="doc-link">Read &rarr;</span>
+</a>
+</div>
+</div></section>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

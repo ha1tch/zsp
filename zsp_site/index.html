@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="index.html#projects">Projects</a>
+<a href="known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="clash-strip"><div class="clash-grid">
+<img src="assets/img/pattern-green-magenta.png" alt="ZX Spectrum attribute clash pattern, green and magenta">
+<img src="assets/img/pattern-yellow-cyan.png" alt="ZX Spectrum attribute clash pattern, yellow and cyan">
+<img src="assets/img/pattern-cyan-red.png" alt="ZX Spectrum attribute clash pattern, cyan and red">
+</div></div>
+<section class="hero"><div class="wrap">
+<p class="hero-eyebrow">haitch's</p>
+<h1><span class="accent">Zen</span> Spectrum Project</h1>
+<p class="zx-subtitle">for the machine in rainbows</p>
+</div></section>
+<section class="section intro"><div class="wrap">
+<p>These were built one at a time, as each was needed, and they turned out to
+fit together into a working toolchain for the ZX Spectrum.
+<strong>zen80</strong> is a Z80 CPU core. <strong>zenzx</strong> wraps it into
+a full 48K/128K/+2/+3 machine, tape and snapshot support included.
+<strong>zenas</strong> assembles Z80 and Z80N source and can run what it
+assembles inside its own built-in emulator. <strong>zentools</strong>
+converts between tape (TAP/TZX), snapshot (.sna/.z80), and BASIC formats.
+<strong>zenimate</strong> draws and animates multi-frame sprites.
+<strong>plus3</strong> reads and writes +3DOS disk images. All under active
+development.</p>
+</div></section>
+<section class="section" id="projects"><div class="wrap">
+<p class="section-label">Projects</p>
+<div class="card-grid">
+<a class="card" href="projects/zentools/index.html" style="--accent: var(--zx-blue);">
+<span class="card-accent"></span>
+<h3>zentools</h3>
+<p class="desc">Convert and inspect the formats a Spectrum actually used</p>
+<div class="meta"><span class="pill">v0.5.0</span><span class="go">Open &rarr;</span></div>
+</a><a class="card" href="projects/zen80/index.html" style="--accent: var(--zx-red);">
+<span class="card-accent"></span>
+<h3>zen80</h3>
+<p class="desc">A Z80, stepped one instruction at a time</p>
+<div class="meta"><span class="pill">v0.1.0</span><span class="go">Open &rarr;</span></div>
+</a><a class="card" href="projects/zenzx/index.html" style="--accent: var(--zx-magenta);">
+<span class="card-accent"></span>
+<h3>ZenZX</h3>
+<p class="desc">48K to +3, one emulator, one Z80 core underneath</p>
+<div class="meta"><span class="pill">v0.4.2</span><span class="go">Open &rarr;</span></div>
+</a><a class="card" href="projects/zenas/index.html" style="--accent: var(--zx-green);">
+<span class="card-accent"></span>
+<h3>zenas</h3>
+<p class="desc">An assembler that runs what it assembles</p>
+<div class="meta"><span class="pill">v0.7.5</span><span class="go">Open &rarr;</span></div>
+</a><a class="card" href="projects/zenimate/index.html" style="--accent: var(--zx-cyan);">
+<span class="card-accent"></span>
+<h3>zenimate</h3>
+<p class="desc">Draw the frame, paint the attributes, watch it move</p>
+<div class="meta"><span class="pill">v0.7.0</span><span class="go">Open &rarr;</span></div>
+</a><a class="card" href="projects/plus3/index.html" style="--accent: var(--zx-yellow);">
+<span class="card-accent"></span>
+<h3>plus3</h3>
+<p class="desc">Everything the +3's disk drive ever wrote, on your host</p>
+<div class="meta"><span class="pill">v0.9.8</span><span class="go">Open &rarr;</span></div>
+</a><a class="card" href="projects/bdf-fonts/index.html" style="--accent: var(--zx-white);">
+<span class="card-accent"></span>
+<h3>bdf-fonts</h3>
+<p class="desc">Bitmap fonts for screens too small for anti-aliasing</p>
+<div class="meta"><span class="pill">docs</span><span class="go">Open &rarr;</span></div>
+</a>
+</div>
+</div></section>
+<script>
+(function() {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return;
+  }
+  var grid = document.querySelector('.clash-grid');
+  var imgs = Array.prototype.slice.call(document.querySelectorAll('.clash-grid img'));
+
+  function shuffle(arr) {
+    arr = arr.slice();
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  setInterval(function() {
+    var slotWidth = grid.offsetWidth / imgs.length;
+    var perm = shuffle(imgs.map(function(_, i) { return i; }));
+    imgs.forEach(function(img, i) {
+      img.style.transform = 'translateX(' + ((perm[i] - i) * slotWidth) + 'px)';
+    });
+  }, 5000);
+})();
+</script>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

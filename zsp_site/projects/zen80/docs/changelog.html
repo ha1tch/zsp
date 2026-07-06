@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog · zen80 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-red);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zen80</a>
+<article class="doc-body">
+<h1 id="changelog">Changelog</h1>
+<p>All notable changes to zen80 are documented in this file.</p>
+<p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>.</p>
+<h2 id="010-2026-06-26"><a href="https://github.com/ha1tch/zen80/releases/tag/v0.1.0">0.1.0</a> - 2026-06-26</h2>
+<p>First versioned release. Establishes the release-hygiene baseline (VERSION
+file, <code>pkg/version</code> package, <code>syncver.sh</code>, <code>release.sh</code>, this changelog) for
+the existing zen80 codebase.</p>
+<h3 id="emulator-core">Emulator core</h3>
+<ul>
+<li>Instruction-stepped Z80 CPU core with full documented instruction set:
+  main, CB-prefixed, ED-prefixed, DD/FD-prefixed (IX/IY), and DDCB/FDCB
+  indexed bit operations.</li>
+<li>Accurate flag handling including the undocumented X and Y flags, and the
+  internal WZ (MEMPTR) register.</li>
+<li>Interrupt support: NMI (edge-triggered) and maskable interrupts in modes
+  0, 1, and 2, with a two-phase Mode 0 instruction-injection buffer and an
+  optional <code>InterruptController</code> interface for vector and Mode 0 supply.</li>
+<li>Correct R-register refresh increment on the M1 cycle.</li>
+</ul>
+<h3 id="memory-and-io">Memory and I/O</h3>
+<ul>
+<li><code>memory</code> package: <code>RAM</code> (64 KB), <code>ROM</code>, and <code>MappedMemory</code> (ROM-low /
+  RAM-high with power-of-two ROM mirroring).</li>
+<li><code>io</code> package: <code>NullIO</code>, <code>SimpleIO</code> (256-port array), and <code>MappedIO</code>
+  (per-port and 8-bit-decode fallback handlers).</li>
+</ul>
+<h3 id="system-layer">System layer</h3>
+<ul>
+<li><code>system</code> package providing a ZX Spectrum system: 48 KB memory map, ULA
+  keyboard/border/speaker I/O, frame timing, and vertical-blank interrupt
+  generation.</li>
+</ul>
+<h3 id="tooling">Tooling</h3>
+<ul>
+<li><code>pkg/version</code> package exposing the <code>Version</code> constant, kept in sync with
+  the root <code>VERSION</code> file via <code>syncver.sh</code>.</li>
+<li><code>release.sh</code> single-pass release preparation: version validation,
+  CHANGELOG check, version sync, build, single test pass with coverage, a
+  version-consistency check, and a binary-free, artifact-free checkpoint zip.</li>
+</ul>
+<h3 id="documentation">Documentation</h3>
+<ul>
+<li><code>runtest.sh</code> now skips the ZEXDOC/ZEXALL exercisers by default (they have
+  their own runners and take minutes); pass <code>--zex</code> to include them.</li>
+<li>Expanded the README testing section to document the three test tiers (fast
+  unit tests, the ROM-backed opcode-coverage test, and the ZEXDOC/ZEXALL
+  conformance exercisers), including the environment variables that gate the
+  exercisers and why <code>go test</code> alone triggers a long run.</li>
+</ul>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

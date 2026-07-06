@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialect compatibility reference · zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenas</a>
+<article class="doc-body">
+<h1 id="dialect-compatibility-reference">Dialect compatibility reference</h1>
+<p>This document records the measured state of zenas's compatibility with pasmo and
+sjasmplus source, and explains what each non-zenas construct does. It exists so
+the corpus diagnostic does not have to be repeated: the findings below were
+produced by assembling pasmo's own sample suite (34 files) under <code>.pasmo</code> mode
+and a sjasmplus/SpecNext corpus (70 files) plain, then tracing every failure to
+its cause and verifying each construct's behaviour against the real pasmo and
+sjasmplus binaries.</p>
+<p>The corpora themselves are third-party (GPL/BSD) and are not vendored; they were
+used only as a diagnostic oracle. This document is the durable artefact.</p>
+<h2 id="headline-results-as-measured">Headline results (as measured)</h2>
+<table>
+<thead>
+<tr>
+<th>Corpus</th>
+<th>Mode</th>
+<th>Pass</th>
+<th>Fail</th>
+<th>Of</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>pasmo own sample suite</td>
+<td><code>.pasmo</code></td>
+<td>7</td>
+<td>27</td>
+<td>34</td>
+</tr>
+<tr>
+<td>sjasmplus / SpecNext</td>
+<td>plain + <code>--next</code></td>
+<td>7</td>
+<td>63</td>
+<td>70</td>
+</tr>
+</tbody>
+</table>
+<p>The low pasmo number is the important correction. The reference kernel (real
+pasmo source that assembles byte-identical) passes because it uses only the
+common core. The
+pasmo sample suite deliberately exercises every pasmo feature, so it exposes the
+true gap. The 7 passing sjasmplus files are the trivial tutorial files with no
+SpecNext-specific constructs; every realistic SpecNext program fails immediately
+on its meta-language (<code>DEVICE</code>, <code>{ }</code>, <code>DISP</code>), not on its instructions.</p>
+<p>Two layers, opposite verdicts: the <strong>instruction body</strong> of any pasmo or sjasmplus
+program already assembles (shared mnemonics, verified on 516 base + 31 Z80N
+instructions). The <strong>directive / meta-syntax layer</strong> is where the gaps are - a
+small, closeable gap for pasmo and a large, semantic-subsystem gap for sjasmplus.</p>
+<h2 id="what-already-works-do-not-re-investigate">What already works (do not re-investigate)</h2>
+<p>Verified present in zenas; these are NOT gaps despite first impressions:</p>
+<table>
+<thead>
+<tr>
+<th>Construct</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$</code> location counter</td>
+<td>pasmo mode; <code>$8000</code> still hex, bare <code>$</code> is current address</td>
+</tr>
+<tr>
+<td><code>$</code> arithmetic (<code>$+4</code>, <code>DJNZ $</code>)</td>
+<td>works</td>
+</tr>
+<tr>
+<td><code>DEFB</code>/<code>DB</code>, <code>DEFW</code>/<code>DW</code>, <code>DEFM</code>, <code>DEFS</code>/<code>DS</code></td>
+<td>full pasmo data-directive set; <code>DM</code>/<code>DC</code>/<code>DZ</code> are NOT pasmo</td>
+</tr>
+<tr>
+<td><code>&amp;FF</code> hex</td>
+<td>works in both dialects</td>
+</tr>
+<tr>
+<td><code>1010b</code> binary suffix</td>
+<td>works</td>
+</tr>
+<tr>
+<td><code>%1010</code> binary prefix</td>
+<td>works</td>
+</tr>
+<tr>
+<td><code>0FFh</code> hex suffix</td>
+<td>works</td>
+</tr>
+<tr>
+<td><code>0x40</code> hex prefix</td>
+<td>works</td>
+</tr>
+<tr>
+<td>character literals <code>'A'</code></td>
+<td>works as byte and (since 0.5.1) as expression term <code>'A'+1</code></td>
+</tr>
+<tr>
+<td>no-colon labels at any indentation</td>
+<td>pasmo mode; matches pasmo (first non-mnemonic identifier is a label)</td>
+</tr>
+<tr>
+<td><code>#80</code> hex prefix</td>
+<td>pasmo mode; <code>#80</code> == <code>0x80</code></td>
+</tr>
+<tr>
+<td>bare unquoted <code>INCLUDE if.asm</code></td>
+<td>works in any mode; native source uses quoted form</td>
+</tr>
+<tr>
+<td><code>IF</code>/<code>ELSE</code>/<code>ENDIF</code>, nested</td>
+<td>works</td>
+</tr>
+<tr>
+<td><code>EQU</code>, forward references</td>
+<td>works</td>
+</tr>
+</tbody>
+</table>
+<h2 id="pasmo-gaps-measured-with-cause-and-cost">pasmo gaps (measured, with cause and cost)</h2>
+<p>Ordered by value-per-effort. "Cost" is implementation effort; "files" is how many
+of the 34 sample files are blocked by it.</p>
+<h3 id="closed-as-of-052">Closed (as of 0.5.2)</h3>
+<p><code>#</code> hex prefix, bare unquoted <code>INCLUDE</code>, and no-colon labels at any indentation
+(not just column 1) are now supported - see the "what already works" table above.
+The remaining gaps below are the ones not yet closed.</p>
+<h3 id="cheap-isolated-lexer-additions-remaining">Cheap, isolated lexer additions (remaining)</h3>
+<p><strong><code>?:</code> ternary operator</strong> - pasmo supports a C-style conditional expression,
+<code>condition ? a : b</code>, evaluated with short-circuit semantics (the untaken branch
+may contain undefined symbols). This is the real meaning of <code>?</code> in pasmo source
+(it is NOT an identifier character, contrary to a first reading of the corpus).
+It appears in <code>black.asm</code>, <code>macro.asm</code>, <code>rept.asm</code>. This is an expression-grammar
+feature (it also pulls in <code>:</code> as an operator), not a cheap lexer alias, so it is
+grouped with the larger gaps rather than the cheap ones. Cost: moderate
+(expression parser). Files: ~3.</p>
+<h3 id="expensive-scoping-subsystem-the-largest-blocker-by-file-count">Expensive scoping subsystem (the largest blocker by file count)</h3>
+<p><strong><code>PROC</code> / <code>ENDP</code></strong> - opens and closes a local scope. Labels defined inside a
+<code>PROC ... ENDP</code> block are visible only within it, so the same label name can be
+reused in different procedures without collision. This is pasmo's structured-label
+mechanism.</p>
+<p><strong><code>LOCAL name[, name...]</code></strong> - declares the named labels as local to the current
+<code>PROC</code> (or to the autolocal scope). A <code>LOCAL n</code> line means <code>n</code> is private to this
+block; an outer <code>n</code> is a different symbol.</p>
+<p><strong><code>PUBLIC name</code></strong> - the inverse: marks a label as exported from its scope, visible
+to the symbol table / other modules.</p>
+<p>These form one feature (scoped labels) and appear in 11 of the 34 files. They are
+the single largest pasmo blocker. Implementing them is a real scoping subsystem
+(a symbol-table scope stack), not a syntactic alias - the expensive, deliberate
+piece of pasmo compatibility. Note: this corrects an earlier impression (based on
+the reference kernel alone, which uses one bare <code>LOCAL</code>) that <code>PROC</code>/<code>LOCAL</code> were
+rare; pasmo's own suite uses them heavily.</p>
+<h3 id="out-of-scope-by-nature">Out of scope by nature</h3>
+<p><strong><code>8086</code> target files</strong> (<code>t86</code>, parts of <code>hellocpm</code>, <code>callvers</code>, <code>echovers</code>) -
+pasmo can emit 8086 code as a Z80 translation. These files are not Z80 programs;
+zenas is a Z80/Z80N assembler and should not assemble them. Counting them as
+"failures" is misleading - they are correctly out of scope.</p>
+<p><strong><code>name MACRO args</code> macro syntax</strong> - pasmo defines a macro as <code>name MACRO params</code>
+... <code>ENDM</code> and calls it bare (<code>delay 5</code>). zenas uses <code>MACRO name(params)</code> ...
+<code>ENDMACRO</code> and calls <code>delay(5)</code>. The pasmo spelling is a deferred, low-frequency
+item (a parser change in the macro subsystem). The no-colon-label rule already
+excludes known macro names so they are not mis-parsed as labels once this lands.</p>
+<h2 id="sjasmplus-gaps-measured-with-cause">sjasmplus gaps (measured, with cause)</h2>
+<p>These are why 63 of 70 files fail. Unlike the pasmo gaps, most are semantic
+subsystems, not syntax. They are documented for the <code>.sjasm</code> design discussion,
+NOT as a to-do list - closing them as compatibility would mean reimplementing
+sjasmplus.</p>
+<p><strong><code>DEVICE &lt;name&gt;</code></strong> (33 files) - selects a target machine model (e.g.
+<code>DEVICE ZXSPECTRUMNEXT</code>, <code>DEVICE ZXSPECTRUM128</code>). It establishes a memory model
+with banked pages, an output size, and which save directives are valid. It is the
+foundation most SpecNext programs are built on, and it is a whole memory-model
+subsystem, not a directive.</p>
+<p><strong><code>{ ... }</code> blocks</strong> (103 files across corpus) - sjasmplus uses braces for
+structured grouping (conditional bodies, struct bodies, scoped regions). zenas
+has no brace-block grammar outside C-style macros.</p>
+<p><strong><code>DISP</code> / <code>ENT</code></strong> (87 files) - <code>DISP &lt;addr&gt;</code> / <code>ENT</code> assemble code as though it
+were located at a different address than where it is stored (displaced assembly),
+used for code that is built at one address but copied to and run at another. A
+distinct addressing subsystem.</p>
+<p><strong><code>=</code> assignment</strong> - <code>startline = 0</code> is a redefinable variable assignment
+(unlike <code>EQU</code>, which is single-assignment). sjasmplus distinguishes constants
+(<code>EQU</code>) from reassignable variables (<code>=</code>). zenas treats <code>=</code> as an unexpected
+token in this position.</p>
+<p><strong><code>:</code> code inlining</strong> - sjasmplus allows multiple instructions on one line
+separated by colons (<code>LD A,C : INC A : PUSH AF</code>). zenas treats <code>:</code> only as a
+label terminator, so it sees the colon mid-line as unexpected.</p>
+<p><strong><code>STRUCT name ... ENDS</code></strong> (7 files) - defines a named record layout; field names
+become byte offsets (<code>STRUCT point / x BYTE / y BYTE / ENDS</code> gives <code>point.x = 0</code>,
+<code>point.y = 1</code>, <code>point = 2</code> as the size). A layout/offset system.</p>
+<p><strong><code>DUP n ... EDUP</code></strong> (7 files) - repeats the enclosed lines <code>n</code> times at assembly
+time (a repetition engine; pasmo's equivalent is <code>REPT</code>). Useful enough that a
+native zenas equivalent could be considered on its own merits, independent of
+sjasmplus compatibility.</p>
+<p><strong><code>SAVENEX</code> / <code>SAVEBIN</code> / <code>SAVESNA</code></strong> (15 files) - write the assembled output to a
+file in a specific container format (<code>.nex</code> for SpecNext, raw binary, snapshot)
+from within the source, often with page/bank arguments. Tied to the <code>DEVICE</code>
+memory model.</p>
+<p><strong><code>MODULE name ... ENDMODULE</code></strong> (2 files) - a namespace for labels; names inside
+are prefixed by the module name. zenas's <strong>packages</strong> are the equivalent and
+better-shaped for the portability goal, so this overlaps existing zenas
+functionality rather than being a missing feature - a candidate for
+spelling-translation (<code>MODULE</code> -&gt; package) rather than reimplementation, should a
+<code>.sjasm</code> mode ever pursue it.</p>
+<h2 id="reading-of-the-two-gaps">Reading of the two gaps</h2>
+<p>pasmo compatibility is <strong>bounded and mostly cheap</strong>: the remaining gap is <code>#</code> hex,
+<code>?</code> identifiers, bare include, and the one expensive-but-finite scoping subsystem
+(<code>PROC</code>/<code>LOCAL</code>/<code>PUBLIC</code>). Reaching high pasmo-corpus coverage is a finishable
+task.</p>
+<p>sjasmplus compatibility is <strong>open-ended</strong>: the gap is dominated by <code>DEVICE</code>,
+<code>{ }</code>, <code>DISP</code>, <code>STRUCT</code>, and the save-format subsystems - years of semantic
+machinery. A SpecNext program is mostly sjasmplus-specific meta-language wrapping
+a shared instruction body. This is the measured evidence that <code>.sjasm</code>-as-a-
+compatibility-promise would be a large build, and that the productive forms of a
+future <code>.sjasm</code> are spelling-translation (e.g. <code>MODULE</code> -&gt; packages) or
+cherry-picking genuinely useful constructs (<code>DUP</code>, <code>ALIGN</code>) into the native
+dialect on their own merits - not wholesale source compatibility.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

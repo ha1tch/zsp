@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zenas programming · zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenas</a>
+<article class="doc-body">
+<h1 id="zenas-programming">Zenas programming</h1>
+<p>This guide is for someone who already knows Z80 assembly and another assembler —
+pasmo, sjasmplus, z80asm — and wants to understand how zenas fits their hands.
+It is in three parts: where zenas is just like home, where it differs, and what
+it lets you do that other assemblers cannot.</p>
+<p>For the exhaustive command and directive reference, see the
+<a href="manual.html">manual</a>. This guide is the orientation; the manual is the dictionary.
+For a hands-on, build-and-test walkthrough, see the
+<a href="packaged-program-tutorial.html">packaged-program tutorial</a>.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#where-zenas-is-just-like-home">Where zenas is just like home</a></li>
+<li><a href="#where-zenas-differs">Where zenas differs</a></li>
+<li><a href="#what-zenas-lets-you-do-that-others-cannot">What zenas lets you do that others cannot</a></li>
+<li><a href="#run-the-code-you-just-assembled">Run the code you just assembled</a></li>
+<li><a href="#assert-on-machine-state">Assert on machine state</a></li>
+<li><a href="#go-style-test-files">Go-style test files</a></li>
+<li><a href="#c-style-macros">C-style macros</a></li>
+<li><a href="#packages-and-disambiguation">Packages and disambiguation</a></li>
+<li><a href="#build-tags-as-a-bitmask">Build tags as a bitmask</a></li>
+<li><a href="#scoped-dialect-modes">Scoped dialect modes</a></li>
+<li><a href="#a-worked-example">A worked example</a></li>
+</ul>
+<h2 id="where-zenas-is-just-like-home">Where zenas is just like home</h2>
+<p>If you have written Z80 in any mainstream assembler, the core of zenas needs no
+relearning. It is a two-pass assembler with forward-reference resolution, and the
+following all behave the way you expect:</p>
+<ul>
+<li><strong>Mnemonics and operands.</strong> The full documented Z80 instruction set, written
+  the usual way: <code>LD A, (HL)</code>, <code>JP NZ, loop</code>, <code>BIT 7, (IX+4)</code>.</li>
+<li><strong>Labels.</strong> <code>name:</code> defines a label; a label on its own line attaches to the
+  following instruction. Symbols are case-sensitive.</li>
+<li><strong>Directives.</strong> <code>ORG</code>, <code>EQU</code>, <code>DB</code>/<code>DW</code> (with strings and multiple values),
+  <code>DS</code>/<code>DEFS</code>, <code>INCLUDE</code>, <code>INCBIN</code> (with optional skip and length).</li>
+<li><strong>Numbers.</strong> <code>0x1F</code>, <code>$1F</code>, <code>%0001</code>, <code>31</code>, and character literals <code>'A'</code>.</li>
+<li><strong>Expressions.</strong> Symbol arithmetic in operands and displacements:
+  <code>LD HL, table + 2*index</code>.</li>
+<li><strong>Conditional assembly.</strong> <code>IF</code>/<code>IFDEF</code>/<code>IFNDEF</code>/<code>ELSE</code>/<code>ENDIF</code>, with symbols
+  pre-defined from the command line via <code>--define</code>.</li>
+<li><strong>A pasmo-format symbol file.</strong> <code>--sym</code> writes the same <code>NAME EQU 0XXXXH</code> file
+  pasmo does, so existing tooling that parses it keeps working.</li>
+</ul>
+<p>zenas assembles real-world operating-system source byte-for-byte identically to
+pasmo, so for ordinary code the output is not merely equivalent — it is the same
+bytes, with the same symbol addresses.</p>
+<h2 id="where-zenas-differs">Where zenas differs</h2>
+<p>The differences are deliberate and small in number. None of them change how a
+plain instruction assembles; they are about the layers around it.</p>
+<ul>
+<li><strong>Two output modes, not one.</strong> <code>zenas assemble</code> emits a raw binary, the way any
+  assembler does. <code>zenas build</code> goes a step further and packages the result into
+  a loadable artifact — a tape (<code>.tap</code>/<code>.tzx</code>) or a runnable snapshot
+  (<code>.sna</code>/<code>.z80</code>) — without a separate tool. See <a href="manual.html">the manual</a> for the
+  full <code>build</code> flag set.</li>
+<li><strong>Macros come in two flavours.</strong> Alongside a traditional
+  <code>MACRO NAME(params) ... ENDMACRO</code> system, zenas has a C-style function syntax
+  that transpiles to macros. You choose per file with <code>.MACRO_STYLE</code>. Most
+  assemblers offer only the traditional kind.</li>
+<li><strong>Names can be packaged.</strong> A <code>.PACKAGE</code> affiliation lets two libraries each
+  define a <code>rotate</code> or an <code>add</code> without colliding, with qualified calls
+  (<code>math.add</code>) to disambiguate. This is closer to a module system than the flat
+  global namespace most assemblers give you.</li>
+<li><strong>Build tags, not just defines.</strong> Beyond <code>--define</code>, zenas has <code>--tag</code>, which
+  defines a presence flag, a numbered bit, and contributes to a composite
+  bitmask — a structured variant-selection mechanism rather than a bag of loose
+  symbols.</li>
+<li><strong>Dialect modes are scoped.</strong> Rather than a global "pasmo-compatible" switch,
+  <code>.pasmo</code>/<code>.zenas</code> flip the lexer mid-stream, so you can ingest pasmo source in
+  one included file without changing how the rest of your program is read.</li>
+<li><strong>A JSON report.</strong> <code>--json=LEVEL</code> emits machine code, symbols, and (at higher
+  levels) an instruction breakdown and timing, instead of a binary — useful when
+  another program is consuming the assembler's output.</li>
+</ul>
+<p>If you do none of these things, zenas is a drop-in for your existing flow.</p>
+<h2 id="what-zenas-lets-you-do-that-others-cannot">What zenas lets you do that others cannot</h2>
+<p>The headline capability is that <strong>zenas can execute the code it just assembled,
+and test it, without leaving the assembler.</strong> A conventional assembler's job ends
+when it has written bytes; verifying those bytes means loading them into a
+separate emulator, by hand or through a script. zenas folds the emulator in.</p>
+<h3 id="run-the-code-you-just-assembled">Run the code you just assembled</h3>
+<p><code>zenas run &lt;file&gt;</code> assembles the source and executes it in-process on the bundled
+zen80 Z80/Z80N core, then reports the final CPU and memory state. There is no
+file round-trip and no second program.</p>
+<pre><code>zenas run game.asm
+</code></pre>
+<p>Execution starts at the first <code>ORG</code> (or at a named routine with <code>--call</code>),
+registers start zeroed for reproducibility, and it stops at <code>HALT</code>, at a
+returning <code>--call</code> routine, or when the instruction cap is hit — the cap
+(<code>--max-steps</code>, default one million) is the infinite-loop guard.</p>
+<p><code>--trace</code> prints each instruction as it runs; <code>--dump=START:LEN</code> (or <code>--hex</code>)
+dumps a memory region afterwards; <code>--preload=ADDR,FILE</code> loads a binary into
+memory before the run, so a routine can operate on real input data.</p>
+<pre><code>zenas run sort.asm --call=sort --preload=0xC000,unsorted.bin --dump=0xC000:16 --trace
+</code></pre>
+<h3 id="assert-on-machine-state">Assert on machine state</h3>
+<p><code>zenas assert</code> runs the code and then checks the final state against
+expectations, printing <code>PASS</code>/<code>FAIL</code> per check and exiting non-zero if any fail —
+so it drops straight into CI. The expectation vocabulary covers:</p>
+<ul>
+<li><strong>registers</strong> — <code>A</code>, <code>B</code>...<code>L</code>, the pairs <code>BC</code>/<code>DE</code>/<code>HL</code>/<code>AF</code>, <code>IX</code>/<code>IY</code>,
+  <code>SP</code>, <code>PC</code>, and the shadow pairs <code>AF_</code>/<code>BC_</code>/<code>DE_</code>/<code>HL_</code>;</li>
+<li><strong>flags</strong> — <code>CF</code>, <code>ZF</code>, <code>SF</code>, <code>HF</code>, <code>PF</code>, <code>NF</code>, each <code>0</code> or <code>1</code>;</li>
+<li><strong>memory bytes</strong> — <code>(0xC000)=0x42</code>.</li>
+</ul>
+<p>Checks are comma-separated, or given as repeated <code>--expect</code> flags:</p>
+<pre><code>zenas assert math.asm --call=multiply --expect=&quot;A=0x0C,CF=0&quot;
+zenas assert math.asm --call=multiply --expect=&quot;A=12&quot; --expect=&quot;(0x9000)=12&quot;
+</code></pre>
+<p>This turns "did my routine compute the right answer" into a one-line, scriptable
+check, with no emulator wiring of your own.</p>
+<h3 id="go-style-test-files">Go-style test files</h3>
+<p>For a suite rather than a single check, a file named <code>*_test.asm</code> can hold the
+program under test plus a set of <code>test_*</code> routines, each followed by an <code>.EXPECT</code>
+directive (and optionally <code>.MATCH</code> for memory spans). <code>zenas assert file_test.asm</code>
+then discovers and runs every <code>test_*</code> routine, go-test style.</p>
+<pre><code class="language-asm">; math_test.asm
+    INCLUDE &quot;math.asm&quot;
+
+test_add_basic:
+    LD A, 5
+    LD B, 10
+    CALL add
+    RET
+    .EXPECT A=15, CF=0
+
+test_add_carry:
+    LD A, 0xFF
+    LD B, 1
+    CALL add
+    RET
+    .EXPECT A=0, CF=1
+</code></pre>
+<pre><code>zenas assert math_test.asm
+</code></pre>
+<p><code>.EXPECT</code> and <code>.MATCH</code> are legal <strong>only</strong> in <code>*_test.asm</code> files — using one
+elsewhere is an assembly error. Test metadata therefore cannot leak into a
+production build: the same source that defines your tests cannot accidentally
+carry them into the shipped binary.</p>
+<h3 id="c-style-macros">C-style macros</h3>
+<p>zenas accepts a C-like function syntax that transpiles to traditional macros,
+selected with <code>.MACRO_STYLE C</code>. Instead of <code>MACRO</code>/<code>ENDMACRO</code>, you write
+function-shaped blocks with typed signatures and an <code>asm { ... }</code> body:</p>
+<pre><code class="language-asm">.MACRO_STYLE C
+void main() {
+    asm {
+        HALT;
+    }
+}
+</code></pre>
+<p>Functions can be typed — <code>uint8_t</code>, <code>uint16_t</code>, or <code>void</code> — and zenas checks the
+return <em>width</em>: a <code>uint8_t</code> function must return an 8-bit value, a <code>void</code> function
+must not return one, and a non-void function that never returns is an error. This
+is a portable half of a calling convention (the width is checked; where the value
+lives is the primitive library's concern), and it is checking no plain macro
+assembler does. It is still sugar over the traditional macro system — the
+transpiler lowers it before assembly — so the two coexist. See the C-style
+examples bundled in <a href="../examples/"><code>examples/</code></a> (the <code>example1*-cstyle-*.asm</code>
+files) and the Macros section of the <a href="manual.html">manual</a>.</p>
+<p>By default a macro's body is expanded at every call site. <code>.MACRO_MODE SINGLETON</code>
+instead emits the body once as a routine and turns each call into a <code>CALL</code> (with
+arguments passed through fixed memory slots) — smaller when a sizeable body is
+reused. See <code>examples/example15-macro-mode.asm</code> and the manual for the details
+and its constraints.</p>
+<h3 id="packages-and-disambiguation">Packages and disambiguation</h3>
+<p>A <code>.PACKAGE</code> directive affiliates the macros that follow with a named package.
+The point is collision-free libraries: two packages can each define <code>add</code>, and a
+qualified call <code>math.add(5, 2)</code> selects one unambiguously. A qualified name is
+also never confused with the <code>ADD</code> mnemonic, so a primitive library can use short
+names like <code>rotate</code> or <code>add</code> without shadowing instructions for its callers.
+Unqualified calls still work and resolve bare-unless-ambiguous. This is closer to
+a namespacing system than the single flat symbol table most assemblers expose.</p>
+<h3 id="build-tags-as-a-bitmask">Build tags as a bitmask</h3>
+<p><code>--tag NAME</code> is more structured than a plain define. Each tag:</p>
+<ul>
+<li>defines <code>ZENAS_TAG_NAME</code> — a presence flag you can test in <code>IF</code>;</li>
+<li>defines <code>ZENAS_TAGBIT_NAME</code> — its bit, assigned in command-line order;</li>
+<li>contributes to <code>ZENAS_TAGS</code> — a composite bitmask, always defined (0 when no
+  tags are set).</li>
+</ul>
+<p>Because the tags compose, <code>IF</code> conditions can use boolean logic over them:</p>
+<pre><code class="language-asm">    IF ZENAS_TAG_debug AND ZENAS_TAG_plus3
+        ; debug build for the +3
+    ENDIF
+</code></pre>
+<pre><code>zenas assemble game.asm --tag debug --tag plus3
+</code></pre>
+<p>This gives you a single, ordered, testable notion of "which variant is this"
+rather than a handful of unrelated <code>--define</code>d symbols.</p>
+<h3 id="scoped-dialect-modes">Scoped dialect modes</h3>
+<p><code>.pasmo</code> switches the lexer into a pasmo-compatible dialect mid-stream, and
+<code>.zenas</code> switches back. The switch is scoped, not global: you can <code>.pasmo</code> then
+<code>INCLUDE</code> a file of pasmo source and have it read correctly, while the rest of
+your program continues to be read as native zenas. The mechanism is the same one
+<code>.MACRO_STYLE C</code> uses — a directive flips the lexer until it is turned off again.
+It is intentionally not an attempt to make the native dialect a superset of
+pasmo, which would create ambiguities (notably around <code>$</code>).</p>
+<h2 id="a-worked-example">A worked example</h2>
+<p>Write a routine, then prove it works without ever opening an emulator:</p>
+<pre><code class="language-asm">; add.asm
+    ORG 0x8000
+add:                 ; A = A + B, sets CF on overflow
+    ADD A, B
+    RET
+</code></pre>
+<pre><code># run it once, watching every instruction and the result
+zenas run add.asm --call=add --trace
+
+# assert the contract in CI
+zenas assert add.asm --call=add --expect=&quot;A=0&quot;      # with A=0,B=0 to start
+
+# build a runnable snapshot to try the larger program by hand
+zenas build add.asm --z80 --start add --model 48k
+</code></pre>
+<p>The same source assembles to the same bytes pasmo would produce; what zenas adds
+is everything <em>after</em> the bytes — running them, asserting on them, testing them,
+and packaging them — in one tool.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

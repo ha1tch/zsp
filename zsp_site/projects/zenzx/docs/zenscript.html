@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zenscript (.zen) reference · ZenZX — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-magenta);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to ZenZX</a>
+<article class="doc-body">
+<h1 id="zenscript-zen-reference">zenscript (<code>.zen</code>) reference</h1>
+<p>zenscript is a small, line-oriented automation format for driving ZenZX. A
+<code>.zen</code> file is a timed list of actions performed on the virtual Spectrum,
+modelled loosely on a subtitle file: each line carries a time offset and an
+action. It lets you boot a model, load media, inject keypresses, capture
+screenshots, and save snapshots in a reproducible, frame-accurate way.</p>
+<p>Scripts work identically in both the windowed (<code>zenzx</code>) and headless
+(<code>zenzx-headless</code>) front-ends, supplied with the <code>-script</code> flag:</p>
+<pre><code>zenzx-headless -model=48k -script=session.zen -frames=400 -shot-dir=out
+zenzx          -model=plus3 -script=session.zen
+</code></pre>
+<p>The conventional file extension is <code>.zen</code>.</p>
+<h2 id="line-format">Line format</h2>
+<pre><code>&lt;offset&gt;  &lt;verb&gt;  [args...]
+</code></pre>
+<p>Fields are separated by whitespace. Blank lines and lines whose first
+non-space character is <code>#</code> are ignored:</p>
+<pre><code># boot, then screenshot two seconds in
+2s   shot   booted
+</code></pre>
+<p>A small number of barrier verbs (currently only <code>wait-boot</code>) take no offset and
+may appear as a lone token on their own line.</p>
+<h2 id="time-offsets">Time offsets</h2>
+<p>The offset is a frame count from power-on by default. ZenZX runs at 50 frames
+per second (PAL), so one frame is 20 ms. A unit suffix may be given and is
+converted to frames when the script is loaded:</p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Meaning</th>
+<th>Frames</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>100</code></td>
+<td>100 frames</td>
+<td>100</td>
+</tr>
+<tr>
+<td><code>100f</code></td>
+<td>100 frames</td>
+<td>100</td>
+</tr>
+<tr>
+<td><code>2s</code></td>
+<td>2 seconds</td>
+<td>100</td>
+</tr>
+<tr>
+<td><code>500ms</code></td>
+<td>500 milliseconds</td>
+<td>25</td>
+</tr>
+</tbody>
+</table>
+<p>Fractional results are rounded to the nearest frame. Negative offsets are
+rejected.</p>
+<p>Within a script, actions are sorted by offset, so they need not be written in
+order. Two actions sharing the same offset fire in the order written, and a
+warning is logged (unless logging is suppressed).</p>
+<h2 id="how-offsets-interact-with-blocking-verbs">How offsets interact with blocking verbs</h2>
+<p>Two kinds of action block the timeline: <code>wait-boot</code> and keyboard injection
+(<code>type</code>, <code>key</code>). While one is in progress, the clock that offsets are measured
+against is held, and when it completes the clock is <em>rebased</em> to that moment.
+Every offset after a blocking action is therefore measured from the moment that
+action finished, not from power-on.</p>
+<p>This is what makes a script portable across models with different boot times.
+The following waits for boot on any model, then acts ten frames later --
+whether the machine booted in 1.7 s (48K) or 2.7 s (+3):</p>
+<pre><code>wait-boot
+10   shot   booted
+20   quit
+</code></pre>
+<p><code>wait-boot</code> also acts as a sort barrier: offsets before it are absolute from
+power-on, offsets after it are relative to boot-ready, and the two groups are
+sorted independently. Multiple <code>wait-boot</code> lines create multiple such
+partitions.</p>
+<h2 id="verbs">Verbs</h2>
+<h3 id="media-and-state">Media and state</h3>
+<table>
+<thead>
+<tr>
+<th>Verb</th>
+<th>Arguments</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snapshot</code></td>
+<td><code>&lt;path&gt; [format]</code></td>
+<td>Load a snapshot (<code>.sna</code>, <code>.z80</code>, <code>.zxs</code>). Format defaults to auto-detection.</td>
+</tr>
+<tr>
+<td><code>snapshot-save</code></td>
+<td><code>&lt;path&gt; [format]</code></td>
+<td>Save the current machine state to a snapshot. Format defaults to the path extension, or <code>zxs</code>.</td>
+</tr>
+<tr>
+<td><code>bin</code></td>
+<td><code>&lt;path&gt; [loadAddr] [startAddr]</code></td>
+<td>Load a raw binary blob into memory. <code>loadAddr</code> defaults to <code>0x8000</code>; <code>startAddr</code> defaults to the load address. Addresses accept <code>0x</code> hex or decimal.</td>
+</tr>
+<tr>
+<td><code>scr</code></td>
+<td><code>&lt;path&gt;</code></td>
+<td>Load a raw <code>.scr</code> screen dump onto the display.</td>
+</tr>
+<tr>
+<td><code>tape-play</code></td>
+<td>none</td>
+<td>Start tape playback (a tape must be loaded).</td>
+</tr>
+<tr>
+<td><code>tape-stop</code></td>
+<td>none</td>
+<td>Stop tape playback.</td>
+</tr>
+<tr>
+<td><code>reset</code></td>
+<td>none</td>
+<td>Reset the CPU.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="control">Control</h3>
+<table>
+<thead>
+<tr>
+<th>Verb</th>
+<th>Arguments</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wait-boot</code></td>
+<td>none (lone token)</td>
+<td>Block until the current model has finished booting, then rebase the timeline. See above.</td>
+</tr>
+<tr>
+<td><code>quit</code></td>
+<td>none</td>
+<td>End the run. In headless this stops the frame loop early; in the windowed build it closes the window.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="screenshots">Screenshots</h3>
+<table>
+<thead>
+<tr>
+<th>Verb</th>
+<th>Arguments</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shot</code></td>
+<td><code>[name]</code></td>
+<td>Capture the 256x192 display to a PNG. With a name, that filename is used (a <code>.png</code> extension is appended if absent). Without one, an auto-generated name is used.</td>
+</tr>
+</tbody>
+</table>
+<p>When a script is driving the run, the front-end's own periodic screenshot
+mechanism (<code>-shot-interval</code> and final-frame capture in headless) is disabled,
+so the script's <code>shot</code> actions are the only source of screenshots.</p>
+<h3 id="keyboard-injection">Keyboard injection</h3>
+<p>A Spectrum reads its keyboard once per frame, so a scripted keypress is held
+across several frames for the ROM to register it, with an idle gap before the
+next key. The defaults are a 5-frame hold and a 3-frame gap (about 0.16 s per
+character). <code>type</code> and <code>key</code> block the timeline until the keys have been
+delivered.</p>
+<table>
+<thead>
+<tr>
+<th>Verb</th>
+<th>Arguments</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td><code>&lt;text&gt;</code></td>
+<td>Type a string. Quote it to preserve spaces (<code>type "10 PRINT"</code>). Each character is mapped to its matrix key, with SYMBOL SHIFT applied for symbols. Untypeable characters are skipped with a warning.</td>
+</tr>
+<tr>
+<td><code>key</code></td>
+<td><code>&lt;name&gt;</code></td>
+<td>Press a single named key or chord: <code>enter</code>, <code>space</code>, <code>delete</code>, <code>edit</code>, <code>break</code>, <code>up</code>, <code>down</code>, <code>left</code>, <code>right</code>, <code>caps</code>, <code>sym</code>.</td>
+</tr>
+<tr>
+<td><code>press</code></td>
+<td><code>&lt;name&gt;</code></td>
+<td>Hold a key down without releasing it (for held-key scenarios such as games). Does not block the timeline.</td>
+</tr>
+<tr>
+<td><code>release</code></td>
+<td><code>&lt;name&gt;</code> or <code>all</code></td>
+<td>Release a previously held key, or <code>all</code> to clear the matrix.</td>
+</tr>
+</tbody>
+</table>
+<p>Notes and current limitations:</p>
+<ul>
+<li>Letters are typed case-insensitively via their unshifted key. Explicit
+  CAPS SHIFT upper-case is not yet applied.</li>
+<li>On the 48K in keyword (<code>K</code>) cursor mode, letter keys produce BASIC keyword
+  tokens rather than individual letters, so <code>type PRINT</code> will not spell the
+  word out letter by letter. This matters for entering BASIC keywords; direct
+  data entry (digits, already-tokenised input) is unaffected.</li>
+</ul>
+<h3 id="screen-text-recognition">Screen text recognition</h3>
+<p>ZenZX can read characters off the display the same way Sinclair BASIC's
+<code>SCREEN$</code> does: by matching each 8x8 character cell against the ROM font. This
+is a pure read and disturbs no machine state. Only the standard ROM font is
+recognised -- programs that redefine the character set or draw text with custom
+routines or UDGs will not be read correctly.</p>
+<table>
+<thead>
+<tr>
+<th>Verb</th>
+<th>Arguments</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dump-screen</code></td>
+<td><code>[row]</code></td>
+<td>Print recognised text. With a row (0-23), prints that row; without, prints all non-blank rows.</td>
+</tr>
+<tr>
+<td><code>expect-screen</code></td>
+<td><code>&lt;row&gt; &lt;text&gt;</code></td>
+<td>Assert that a row contains the given text (case-sensitive substring) <em>at this instant</em>. Pass/fail is logged; failures are counted and reported, but do not abort the run.</td>
+</tr>
+<tr>
+<td><code>wait-screen</code></td>
+<td><code>&lt;row&gt; &lt;text&gt; [timeout=&lt;frames\|Ns\|Nms&gt;]</code></td>
+<td>Block the timeline until the row contains the text, then rebase. Times out (default 5 s) with a counted failure if the text never appears. Acts as a timeline barrier like <code>wait-boot</code>.</td>
+</tr>
+<tr>
+<td><code>wait-attr</code></td>
+<td><code>&lt;rowspec&gt; &lt;colourspec&gt; [count=N] [timeout=...]</code></td>
+<td>Block until at least <code>count</code> cells (default 1) in the region match the colour predicate, then rebase. Recognises screens by colour when their characters use a custom font the glyph matcher cannot read.</td>
+</tr>
+</tbody>
+</table>
+<p><code>wait-attr</code> matches on attributes rather than glyphs. The <code>rowspec</code> is a single
+row (<code>10</code>), an inclusive range (<code>8-12</code>), or <code>all</code>. The <code>colourspec</code> is one or
+more of <code>ink=COLOUR</code>, <code>paper=COLOUR</code>, <code>bright</code>, or <code>bright=0|1</code>, where <code>COLOUR</code>
+is a name (<code>black blue red magenta green cyan yellow white</code>) or <code>0</code>-<code>7</code>.
+Unspecified fields are wildcards. For example, waiting for a 128K-style menu's
+bright rainbow band, or a highlighted item drawn in cyan:</p>
+<pre><code>wait-attr 7    bright count=8       timeout=10s
+wait-attr 0-14 paper=cyan count=1   timeout=10s
+</code></pre>
+<p>This is the tool for driving game menus whose text cannot be recognised: many
+menus are identifiable by their colour layout alone.</p>
+<p><code>expect-screen</code> checks the screen at a fixed offset, which is fragile for
+content whose timing varies (such as tape-load messages). <code>wait-screen</code>
+synchronises on the content itself, so a script need not guess when a message
+will appear -- it waits for it, robust to load speed, tape mode, or model. For
+example, detecting a tape's load headers:</p>
+<pre><code>wait-boot
+10   type   j
+30   type   &quot;&quot;
+60   key    enter
+80   tape-play
+0    wait-screen 1 Program: myprog  timeout=20s
+0    wait-screen 1 Bytes: mycode    timeout=20s
+10   quit
+</code></pre>
+<p>Example -- boot, then verify the 48K copyright line is present:</p>
+<pre><code>wait-boot
+5    expect-screen 23 Sinclair
+10   quit
+</code></pre>
+<h2 id="examples">Examples</h2>
+<p>Boot a 48K, type a line of digits, capture it:</p>
+<pre><code>wait-boot
+5    type   1234
+15   shot   typed
+25   quit
+</code></pre>
+<p>Load a tape and let it run, screenshotting along the way:</p>
+<pre><code>0     tape-play
+2s    shot    loading
+20s   shot    loaded
+</code></pre>
+<p>Save a snapshot once a game has reached its title screen:</p>
+<pre><code>wait-boot
+300   snapshot-save   title.z80
+310   quit
+</code></pre>
+<h2 id="recipes-probing-machine-state">Recipes: probing machine state</h2>
+<p>These patterns came out of using scripts to read post-boot system state (for
+example, finding where the +3 BASIC program area lands) rather than just driving
+the display. They are reliable because they let the ROM finish its own
+initialisation before anything is read or patched.</p>
+<h3 id="read-a-system-variable-after-boot">Read a system variable after boot</h3>
+<p>The robust way to inspect a system variable (or any RAM) is to let the machine
+boot fully, save a snapshot, then read the bytes out of the snapshot on the host.
+<code>wait-boot</code> is the key: offsets after it are relative to boot-ready, so the ROM
+has already set up the system variables by the time the snapshot is taken.</p>
+<pre><code>wait-boot
+0   snapshot-save   state.sna   sna
+1   quit
+</code></pre>
+<p>Run it and parse the snapshot. In a standard <code>.sna</code>, RAM at <code>0x4000</code> begins at
+file offset 27, so a system variable at address <code>A</code> (in the <code>0x4000</code>-<code>0x7FFF</code>
+range, which is RAM page 5) is at snapshot offset <code>27 + (A - 0x4000)</code>, stored
+little-endian. For example, PROG lives at <code>0x5C53</code>:</p>
+<pre><code>offset = 27 + (0x5C53 - 0x4000)   # = 27 + 0x1C53
+prog   = snap[offset] | (snap[offset+1] &lt;&lt; 8)
+</code></pre>
+<p>Cross-check against a couple of neighbouring variables to confirm the machine is
+in the state you expect: on a freshly booted machine with no BASIC program
+entered, <code>VARS</code> (<code>0x5C4B</code>) equals <code>PROG</code>, because the variables area sits
+immediately after a zero-length program.</p>
+<h3 id="patch-ram-after-boot-without-redirecting-execution">Patch RAM after boot without redirecting execution</h3>
+<p><code>bin</code> takes an optional start address. Passing <code>-1</code> loads the blob into memory but
+leaves the program counter untouched, so the running system continues normally
+with the patched bytes in place. This is the way to inject a probe, a patch, or
+fixture data into an already-booted machine rather than jumping straight into a
+blob from a cold start (where the ROM has not initialised the system variables
+yet).</p>
+<pre><code>wait-boot
+0   bin   patch.bin   0x8000   -1
+</code></pre>
+<p>Without <code>wait-boot</code>, a <code>bin</code> that <em>does</em> set a start address runs your code before
+the ROM has set up the system, which is rarely what you want when the code expects
+a normal machine environment.</p>
+<h2 id="validation">Validation</h2>
+<p>Unknown verbs are a hard error: the script is refused and the offending line is
+named, rather than silently skipped. This catches typos early. The keyboard
+verbs and other future actions are part of the known vocabulary, so a script
+using them loads even where a particular action is not yet available.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

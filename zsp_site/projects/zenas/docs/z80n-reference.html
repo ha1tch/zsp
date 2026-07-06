@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Z80N (ZX Spectrum Next) instruction reference · zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenas</a>
+<article class="doc-body">
+<h1 id="z80n-zx-spectrum-next-instruction-reference">Z80N (ZX Spectrum Next) instruction reference</h1>
+<blockquote>
+<p><strong>Status: implemented and validated.</strong> Enable with <code>--next</code> or <code>--cpu=Z80N</code>
+(default is <code>--cpu=Z80</code>, Z80N off). Every Z80N form is verified byte-for-byte
+against <strong>sjasmplus</strong> (the de facto ZX Spectrum Next assembler, and the
+reference implementation of Z80N encoding) by <code>tools/check_z80n_coverage.sh</code>.
+The base Z80 set additionally matches sjasmplus across all 516 checked forms.</p>
+</blockquote>
+<p>Implementation reference for adding Z80N support to zenas. Every opcode below is
+taken from the official SpecNext wiki (Extended Z80 instruction set) and
+cross-checked against the implementers' list in z88dk issue #312. zenas does not
+currently support Z80N; this document is the ground truth for that work.</p>
+<p>All Z80N instructions are <code>ED</code>-prefixed. Gating them behind a <code>--next</code> flag (or a
+<code>Z80N</code>/<code>CPU Z80N</code> directive) is recommended so a stray <code>MUL</code> in plain Z80 source
+is still an error.</p>
+<h2 id="verified-opcode-table">Verified opcode table</h2>
+<table>
+<thead>
+<tr>
+<th>Mnemonic</th>
+<th>Encoding (hex)</th>
+<th>Bytes</th>
+<th>Operand notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SWAPNIB</code></td>
+<td><code>ED 23</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>MIRROR A</code></td>
+<td><code>ED 24</code></td>
+<td>2</td>
+<td>operand is always <code>A</code>; accept <code>MIRROR</code> and <code>MIRROR A</code></td>
+</tr>
+<tr>
+<td><code>TEST n</code></td>
+<td><code>ED 27 n</code></td>
+<td>3</td>
+<td>8-bit immediate</td>
+</tr>
+<tr>
+<td><code>BSLA DE,B</code></td>
+<td><code>ED 28</code></td>
+<td>2</td>
+<td>operands fixed (<code>DE,B</code>)</td>
+</tr>
+<tr>
+<td><code>BSRA DE,B</code></td>
+<td><code>ED 29</code></td>
+<td>2</td>
+<td>operands fixed</td>
+</tr>
+<tr>
+<td><code>BSRL DE,B</code></td>
+<td><code>ED 2A</code></td>
+<td>2</td>
+<td>operands fixed</td>
+</tr>
+<tr>
+<td><code>BSRF DE,B</code></td>
+<td><code>ED 2B</code></td>
+<td>2</td>
+<td>operands fixed</td>
+</tr>
+<tr>
+<td><code>BRLC DE,B</code></td>
+<td><code>ED 2C</code></td>
+<td>2</td>
+<td>operands fixed</td>
+</tr>
+<tr>
+<td><code>MUL D,E</code></td>
+<td><code>ED 30</code></td>
+<td>2</td>
+<td>operands fixed (<code>D,E</code>); accept <code>MUL</code> and <code>MUL D,E</code></td>
+</tr>
+<tr>
+<td><code>ADD HL,A</code></td>
+<td><code>ED 31</code></td>
+<td>2</td>
+<td>second operand is <code>A</code></td>
+</tr>
+<tr>
+<td><code>ADD DE,A</code></td>
+<td><code>ED 32</code></td>
+<td>2</td>
+<td>second operand is <code>A</code></td>
+</tr>
+<tr>
+<td><code>ADD BC,A</code></td>
+<td><code>ED 33</code></td>
+<td>2</td>
+<td>second operand is <code>A</code></td>
+</tr>
+<tr>
+<td><code>ADD HL,nn</code></td>
+<td><code>ED 34 lo hi</code></td>
+<td>4</td>
+<td>16-bit immediate, little-endian</td>
+</tr>
+<tr>
+<td><code>ADD DE,nn</code></td>
+<td><code>ED 35 lo hi</code></td>
+<td>4</td>
+<td>16-bit immediate, little-endian</td>
+</tr>
+<tr>
+<td><code>ADD BC,nn</code></td>
+<td><code>ED 36 lo hi</code></td>
+<td>4</td>
+<td>16-bit immediate, little-endian</td>
+</tr>
+<tr>
+<td><code>PUSH nn</code></td>
+<td><code>ED 8A hi lo</code></td>
+<td>4</td>
+<td><strong>16-bit immediate, BIG-endian</strong> (unique - see note)</td>
+</tr>
+<tr>
+<td><code>OUTINB</code></td>
+<td><code>ED 90</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>NEXTREG n,n</code></td>
+<td><code>ED 91 reg val</code></td>
+<td>4</td>
+<td>two 8-bit immediates: register number, then value</td>
+</tr>
+<tr>
+<td><code>NEXTREG n,A</code></td>
+<td><code>ED 92 reg</code></td>
+<td>3</td>
+<td>8-bit immediate register number; value comes from <code>A</code></td>
+</tr>
+<tr>
+<td><code>PIXELDN</code></td>
+<td><code>ED 93</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>PIXELAD</code></td>
+<td><code>ED 94</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>SETAE</code></td>
+<td><code>ED 95</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>JP (C)</code></td>
+<td><code>ED 98</code></td>
+<td>2</td>
+<td>none (fixed operand <code>(C)</code>)</td>
+</tr>
+<tr>
+<td><code>LDIX</code></td>
+<td><code>ED A4</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>LDWS</code></td>
+<td><code>ED A5</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>LDDX</code></td>
+<td><code>ED AC</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>LDIRX</code></td>
+<td><code>ED B4</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>LDPIRX</code></td>
+<td><code>ED B7</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>LDDRX</code></td>
+<td><code>ED BC</code></td>
+<td>2</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<h2 id="critical-encoding-notes">Critical encoding notes</h2>
+<ol>
+<li>
+<p><strong><code>PUSH nn</code> is big-endian.</strong> It is the only Z80 operand encoded high-byte
+   first. <code>PUSH $1234</code> assembles to <code>ED 8A 12 34</code>, not <code>ED 8A 34 12</code>. Every other
+   16-bit immediate on the Z80 (including <code>ADD HL/DE/BC,nn</code> above) is little-endian.</p>
+</li>
+<li>
+<p><strong><code>ADD rr,A</code> vs <code>ADD rr,nn</code> share a mnemonic but differ by operand type.</strong>
+   <code>ADD HL,A</code> is <code>ED 31</code> (2 bytes); <code>ADD HL,$im16</code> is <code>ED 34 lo hi</code> (4 bytes).
+   The encoder must dispatch on whether the second operand is the register <code>A</code> or
+   an immediate. Note these collide in mnemonic with the standard <code>ADD HL,rr</code>
+   (<code>09/19/29/39</code>) and <code>ADD A,r</code> - the operand types disambiguate.</p>
+</li>
+<li>
+<p><strong>Fixed-operand instructions.</strong> <code>MUL D,E</code>, <code>MIRROR A</code>, the <code>BSxx/BRLC DE,B</code>
+   group, and <code>JP (C)</code> take only their hard-wired operands. Accept the canonical
+   form; optionally accept the bare mnemonic (<code>MUL</code>, <code>MIRROR</code>) as the Next
+   community commonly writes them, but reject wrong operands (<code>MUL B,C</code>).</p>
+</li>
+<li>
+<p><strong><code>NEXTREG</code> has two forms</strong> distinguished by the second operand: an immediate
+   (<code>ED 91 reg val</code>) or the register <code>A</code> (<code>ED 92 reg</code>). The register number is
+   always an 8-bit immediate, never a CPU register.</p>
+</li>
+</ol>
+<h2 id="provenance-rejected-data">Provenance / rejected data</h2>
+<ul>
+<li>Primary source: <a href="https://wiki.specnext.dev/Extended_Z80_instruction_set">https://wiki.specnext.dev/Extended_Z80_instruction_set</a>
+  (opcode table), cross-checked against
+  <a href="https://github.com/z88dk/z88dk/issues/312">https://github.com/z88dk/z88dk/issues/312</a> (implementers' early list).</li>
+<li>The deprecated <code>zxa</code> project's Z80N table was found to be <strong>wrong</strong> for the
+  register-pair adds (it had <code>ADD HL,A = ED 7C</code>, <code>ADD DE,A = ED 77</code>,
+  <code>ADD BC,A = ED 76</code>; the correct values are <code>ED 31/32/33</code>). It also omitted
+  <code>ADD rr,nn</code> (<code>ED 34/35/36</code>), <code>JP (C)</code> (<code>ED 98</code>), and <code>LDWS</code> (<code>ED A5</code>), and
+  listed a <code>CUP = ED B5</code> ("Copper") instruction that does <strong>not</strong> appear in the
+  official table. Do not copy any opcode from zxa; this document supersedes it.</li>
+</ul>
+<h2 id="suggested-implementation-approach">Suggested implementation approach</h2>
+<ol>
+<li>Add a <code>--next</code> CLI flag (and/or a source directive) that enables a Z80N
+   instruction table on top of the base set. Default off.</li>
+<li>Register the fixed-operand and no-operand forms as simple <code>ED</code>-prefixed
+   emits (mirrors the existing block-I/O registrations).</li>
+<li>Add dedicated encoders for the three operand-bearing shapes:
+   <code>TEST n</code> / <code>NEXTREG n,n</code> / <code>NEXTREG n,A</code> (8-bit immediates),
+   <code>ADD rr,nn</code> (little-endian 16-bit), and <code>PUSH nn</code> (big-endian 16-bit).</li>
+<li>Extend the coverage checker (<code>tools/</code>) with the Z80N forms, guarded by the
+   <code>--next</code> flag, and compare against a Next-aware reference assembler
+   (sjasmplus with <code>--zxnext</code>, or CSpect's assembler) rather than pasmo, which
+   does not know Z80N.</li>
+</ol>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zen80 · zen80 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-red);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zen80</a>
+<article class="doc-body">
+<h1 id="zen80">zen80</h1>
+<h4 id="is-a-z80-emulator-written-in-go">is a Z80 Emulator written in Go</h4>
+<p>A simple instruction-stepped Z80 CPU emulator written in Go, inspired by the cycle-accurate emulation techniques described in floooh's blog posts.</p>
+<h2 id="features">Features</h2>
+<ul>
+<li><strong>Instruction-stepped execution</strong>: Simple and fast, suitable for most games and applications</li>
+<li><strong>Complete instruction set</strong>: All documented Z80 instructions including:</li>
+<li>Main instructions</li>
+<li>CB-prefixed (bit operations)</li>
+<li>ED-prefixed (extended instructions)</li>
+<li>DD/FD-prefixed (IX/IY operations)</li>
+<li>DDCB/FDCB-prefixed (indexed bit operations)</li>
+<li><strong>Accurate flag handling</strong>: Including undocumented X and Y flags</li>
+<li><strong>Interrupt support</strong>: NMI and maskable interrupts (modes 0, 1, 2)</li>
+<li><strong>Memory and I/O interfaces</strong>: Flexible interfaces for custom implementations</li>
+<li><strong>Clean API</strong>: Simple to integrate into larger projects</li>
+</ul>
+<h2 id="project-structure">Project Structure</h2>
+<pre><code>zen80/
+├── z80/
+│   ├── z80.go           # Core CPU state and main loop
+│   ├── decode.go        # Instruction decoder
+│   ├── alu.go           # Arithmetic and logic operations
+│   ├── prefix_cb.go     # CB-prefixed instructions
+│   ├── prefix_ed.go     # ED-prefixed instructions
+│   └── prefix_ddfd.go   # DD/FD-prefixed instructions
+├── memory/
+│   └── memory.go        # Memory implementations
+├── io/
+│   └── io.go           # I/O port implementations
+├── cmd/
+│   └── example/
+│       └── main.go     # Example programs
+├── go.mod
+└── README.md
+</code></pre>
+<h2 id="quick-start">Quick Start</h2>
+<pre><code class="language-go">package main
+
+import (
+    &quot;github.com/ha1tch/zen80/z80&quot;
+    &quot;github.com/ha1tch/zen80/memory&quot;
+    &quot;github.com/ha1tch/zen80/io&quot;
+)
+
+func main() {
+    // Create memory and I/O
+    mem := memory.NewRAM()
+    io := io.NewNullIO()
+
+    // Load a program
+    program := []uint8{
+        0x3E, 0x05,  // LD A, 5
+        0x06, 0x03,  // LD B, 3
+        0x80,        // ADD A, B
+        0x76,        // HALT
+    }
+    mem.Load(0x0000, program)
+
+    // Create and run CPU
+    cpu := z80.New(mem, io)
+    for !cpu.Halted {
+        cpu.Step()
+    }
+
+    // Result is in register A
+    fmt.Printf(&quot;Result: %d\n&quot;, cpu.A)
+}
+</code></pre>
+<h2 id="usage">Usage</h2>
+<h3 id="basic-cpu-control">Basic CPU Control</h3>
+<pre><code class="language-go">// Create CPU
+cpu := z80.New(memory, io)
+
+// Reset CPU
+cpu.Reset()
+
+// Execute one instruction
+cycles := cpu.Step()
+
+// Run until condition
+cpu.Run(func() bool {
+    return !shouldStop
+})
+</code></pre>
+<h3 id="memory-implementation">Memory Implementation</h3>
+<p>Implement the <code>MemoryInterface</code>:</p>
+<pre><code class="language-go">type MemoryInterface interface {
+    Read(address uint16) uint8
+    Write(address uint16, value uint8)
+}
+</code></pre>
+<p>Built-in implementations:
+- <code>RAM</code>: Simple 64KB RAM
+- <code>ROM</code>: Read-only memory
+- <code>MappedMemory</code>: ROM + RAM regions</p>
+<h3 id="io-implementation">I/O Implementation</h3>
+<p>Implement the <code>IOInterface</code>:</p>
+<pre><code class="language-go">type IOInterface interface {
+    In(port uint16) uint8
+    Out(port uint16, value uint8)
+}
+</code></pre>
+<p>Built-in implementations:
+- <code>NullIO</code>: Returns 0xFF for all reads
+- <code>SimpleIO</code>: Basic 256-port array
+- <code>MappedIO</code>: Port handlers with callbacks</p>
+<h3 id="interrupts">Interrupts</h3>
+<pre><code class="language-go">// Trigger interrupts
+cpu.INT = true  // Maskable interrupt
+cpu.NMI = true  // Non-maskable interrupt
+
+// Interrupt modes
+cpu.IM = 0  // Mode 0: Execute instruction from data bus
+cpu.IM = 1  // Mode 1: RST 38H
+cpu.IM = 2  // Mode 2: Vectored interrupts
+</code></pre>
+<h2 id="design-decisions">Design Decisions</h2>
+<p>Based on the lessons from the cycle-accurate emulation articles:</p>
+<ol>
+<li><strong>Instruction-Stepped Approach</strong>: Chosen for simplicity and adequate performance for most use cases</li>
+<li><strong>Clean Interfaces</strong>: Memory and I/O as interfaces allow flexible implementations</li>
+<li><strong>No Complex Callbacks</strong>: Simple, synchronous execution model</li>
+<li><strong>Direct Register Access</strong>: Public register fields for easy inspection and debugging</li>
+<li><strong>Accurate Flag Behavior</strong>: Including undocumented flags for compatibility</li>
+</ol>
+<h2 id="performance-considerations">Performance Considerations</h2>
+<ul>
+<li><strong>Optimized for clarity over speed</strong>: The code prioritizes readability and correctness</li>
+<li><strong>No JIT compilation</strong>: Pure interpretation for portability</li>
+<li><strong>Suitable for</strong>: Games, business software, educational purposes</li>
+<li><strong>May struggle with</strong>: Timing-critical demos, exact hardware simulation</li>
+</ul>
+<h2 id="testing">Testing</h2>
+<p>The intended entry point for running the tests is the <code>runtest.sh</code> script. It
+sets up the ROM path and step budget the ROM-backed test needs, runs the fast
+unit tests, and skips the slow conformance exercisers by default:</p>
+<pre><code class="language-bash">./runtest.sh            # fast unit tests + ROM-backed opcode-coverage test
+./runtest.sh --zex      # the above, plus the ZEXDOC/ZEXALL exercisers
+</code></pre>
+<p>The test suite has three tiers, described below. The distinction matters
+because the ZEXDOC/ZEXALL exercisers run for billions of cycles and take
+minutes, so they are kept separate from the fast tests that <code>runtest.sh</code> runs
+by default.</p>
+<h3 id="1-fast-unit-tests">1. Fast unit tests</h3>
+<p>The bulk of the suite: per-instruction behaviour, flag derivations, timing,
+prefixes, and interrupt modes (27 test files). These run in well under a
+second and are what <code>runtest.sh</code> runs by default.</p>
+<h3 id="2-rom-backed-opcode-coverage-test">2. ROM-backed opcode-coverage test</h3>
+<p><code>opcov_runtime_rom_test.go</code> executes a real 128K ROM to exercise opcode
+coverage at runtime. It needs a ROM path and a step budget, which <code>runtest.sh</code>
+provides: it points <code>Z80_ROM_PATH</code> at <code>rom/128-0.rom</code> and runs with a 50M-step
+budget. (Run on its own it would skip for lack of those.)</p>
+<h3 id="3-zexdoc-zexall-conformance-exercisers">3. ZEXDOC / ZEXALL conformance exercisers</h3>
+<p>These are the standard Z80 instruction exercisers (the same ones used to
+validate real hardware emulators), run under a small CP/M BDOS shim. ZEXDOC
+checks documented flag behaviour; ZEXALL additionally checks the undocumented
+flag bits. Each runs to completion and <strong>takes several minutes</strong>:</p>
+<pre><code class="language-bash">./zexdoc.sh     # documented-flags exerciser
+./zexall.sh     # documented + undocumented flags
+</code></pre>
+<p>A passing run prints each instruction group followed by <code>OK</code>. Console output
+is captured to <code>zexdoc.out</code> / <code>zexall.out</code>.</p>
+<p>These exercisers are gated behind environment variables so they do not run by
+accident. The runner scripts set them for you; the key ones are:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Z80_ZEX_STEPS</code> / <code>Z80_ZEXALL_STEPS</code></td>
+<td>Maximum CPU steps. <strong><code>0</code> means unlimited</strong> (run to completion).</td>
+</tr>
+<tr>
+<td><code>Z80_ZEX_OUTPUT</code> / <code>Z80_ZEXALL_OUTPUT</code></td>
+<td>File to capture console output to.</td>
+</tr>
+<tr>
+<td><code>Z80_ZEX_PROGRESS_EVERY</code></td>
+<td>How often to print a progress line (in steps).</td>
+</tr>
+<tr>
+<td><code>Z80_ZEX_SILENT_LIMIT</code></td>
+<td>Steps with no new output before the harness gives up.</td>
+</tr>
+</tbody>
+</table>
+<p>The scripts run the exercisers with <code>-timeout=0</code> so Go's default 10-minute test
+timeout does not cut them off. Run them on a real machine; in a heavily
+constrained or sandboxed environment they may appear to hang simply because
+they need the cycles to finish.</p>
+<h3 id="running-individual-tests">Running individual tests</h3>
+<p>To work on one instruction or behaviour, run a single test by name with <code>go
+test -run</code>. The pattern is anchored to a test function name:</p>
+<pre><code class="language-bash"># one test
+go test ./z80 -run '^TestDAA_AfterAdd_LowerNibbleOverflow$' -v
+
+# a related group (prefix match)
+go test ./z80 -run '^TestDAA' -v
+
+# everything except the slow exercisers
+go test ./z80 -run '^Test' -skip 'ZEX|ZEXALL'
+</code></pre>
+<p><code>go test ./z80</code> with no <code>-run</code> will also pick up the ZEXDOC/ZEXALL exercisers
+(they default to billions of steps), so always pair a bare package run with
+<code>-skip 'ZEX|ZEXALL'</code> unless you mean to run them.</p>
+<h2 id="future-enhancements">Future Enhancements</h2>
+<p>Potential improvements while maintaining simplicity:</p>
+<ol>
+<li><strong>Basic Debugger</strong>: Breakpoints, step debugging, register inspection</li>
+<li><strong>Cycle Counting</strong>: More accurate cycle counting for each instruction</li>
+<li><strong>State Serialization</strong>: Save/load CPU state</li>
+<li><strong>Performance Optimizations</strong>: Table-driven decoder, caching</li>
+<li><strong>Test Suite</strong>: Comprehensive instruction testing</li>
+</ol>
+<h2 id="references">References</h2>
+<ul>
+<li><a href="http://www.z80.info/z80-documented.pdf">Z80 CPU User Manual</a></li>
+<li><a href="http://www.z80.info/z80undoc.htm">The Undocumented Z80 Documented</a></li>
+<li><a href="https://floooh.github.io/2021/12/17/cycle-stepped-z80.html">floooh's Z80 Emulation Blog Posts</a></li>
+<li><a href="http://www.z80.info/decoding.htm">Decoding Z80 Opcodes</a></li>
+</ul>
+<h2 id="contact">Contact</h2>
+<p>Email: h@ual.li</p>
+<p>https://oldbytes.space/@haitchfive</p>
+<h2 id="license">License</h2>
+<p>Copyright 2026 h@ual.li</p>
+<p>Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at</p>
+<pre><code>http://www.apache.org/licenses/LICENSE-2.0
+</code></pre>
+<p>Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

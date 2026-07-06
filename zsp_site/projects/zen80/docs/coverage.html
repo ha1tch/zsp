@@ -1,0 +1,2062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zen80 Z80 Implementation Function Mapping · zen80 — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-red);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zen80</a>
+<article class="doc-body">
+<h2 id="implementation-summary-notes">Implementation Summary Notes</h2>
+<h3 id="current-implementation-status">Current Implementation Status:</h3>
+<p>The Z80 emulator has matured significantly with comprehensive instruction coverage, accurate flag handling, and proper timing. All major instruction groups are implemented with careful attention to undocumented behaviors.</p>
+<h3 id="key-improvements-since-v1">Key Improvements Since v1:</h3>
+<ol>
+<li><strong>X/Y Flag Handling</strong>: Fixed throughout - now correctly set from result for most operations, from operand for CP, and from WZ high byte for BIT n,(HL)</li>
+<li><strong>Interrupt Mode 0</strong>: Proper implementation with instruction buffer execution via InterruptController interface</li>
+<li><strong>R Register</strong>: Correctly incremented on M1 cycles including post-prefix fetches</li>
+<li><strong>Prefix Interactions</strong>: DD→ED, FD→DD, etc. properly handled with correct cycle additions</li>
+<li><strong>Block Instructions</strong>: Enhanced flag calculations for INI/IND/OUTI/OUTD with accurate undocumented behavior</li>
+<li><strong>IXH/IXL/IYH/IYL</strong>: Fully implemented undocumented register access via DD/FD prefixes</li>
+</ol>
+<h3 id="remaining-minor-issues">Remaining Minor Issues:</h3>
+<ol>
+<li><strong>ED Undefined Opcodes</strong>: Comprehensive switch statement handles most, but could be more elegant</li>
+<li><strong>Cycle Verification</strong>: <code>VerifyInstructionTiming()</code> exists but only called when DEBUG_TIMING is true</li>
+<li><strong>Mode 0 Complexity</strong>: While functional, Mode 0 implementation is complex with two-phase execution</li>
+</ol>
+<h3 id="correctly-implemented-features">Correctly Implemented Features:</h3>
+<ol>
+<li><strong>All Documented Instructions</strong>: Complete Z80 instruction set</li>
+<li><strong>Undocumented Instructions</strong>: SLL, IXH/IXL/IYH/IYL access, DDCB/FDCB register copy</li>
+<li><strong>Undocumented Flags</strong>: X and Y flags with proper behavior for all instruction types</li>
+<li><strong>Interrupt Handling</strong>: All three modes with proper timing and edge detection</li>
+<li><strong>WZ Register</strong>: Correctly maintained for flag calculations</li>
+<li><strong>Prefix Chains</strong>: Complex prefix sequences handled correctly</li>
+<li><strong>Block Instructions</strong>: Full implementation with proper flag calculations</li>
+</ol>
+<h1 id="zen80-z80-implementation-function-mapping">zen80 Z80 Implementation Function Mapping</h1>
+<h2 id="implementation-status-legend">Implementation Status Legend</h2>
+<ul>
+<li><strong>FULL</strong>: Complete implementation with all documented behaviour</li>
+<li><strong>NOT IMPL</strong>: Not implemented</li>
+<li><strong>NOP</strong>: Defaults to NOP behaviour</li>
+<li><strong>HANDLED</strong>: Handled through special logic</li>
+<li><strong>UNDOC</strong>: Undocumented instruction implemented</li>
+<li><strong>ENHANCED</strong>: Implementation with accurate undocumented behavior</li>
+</ul>
+<h2 id="main-instructions-unprefixed">Main Instructions (Unprefixed)</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>00</td>
+<td>NOP</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=0</td>
+</tr>
+<tr>
+<td>01</td>
+<td>LD BC,nn</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=0, p=0</td>
+</tr>
+<tr>
+<td>02</td>
+<td>LD (BC),A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=0</td>
+</tr>
+<tr>
+<td>03</td>
+<td>INC BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=0, p=0</td>
+</tr>
+<tr>
+<td>04</td>
+<td>INC B</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td>DEC B</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td>LD B,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>07</td>
+<td>RLCA</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=0 + <code>rlc8()</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td>EX AF,AF'</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=1</td>
+</tr>
+<tr>
+<td>09</td>
+<td>ADD HL,BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=1 + <code>add16()</code></td>
+</tr>
+<tr>
+<td>0A</td>
+<td>LD A,(BC)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=1</td>
+</tr>
+<tr>
+<td>0B</td>
+<td>DEC BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=1, p=0</td>
+</tr>
+<tr>
+<td>0C</td>
+<td>INC C</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>0D</td>
+<td>DEC C</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>0E</td>
+<td>LD C,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>0F</td>
+<td>RRCA</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=1 + <code>rrc8()</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td>DJNZ d</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=2</td>
+</tr>
+<tr>
+<td>11</td>
+<td>LD DE,nn</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=0, p=1</td>
+</tr>
+<tr>
+<td>12</td>
+<td>LD (DE),A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=2</td>
+</tr>
+<tr>
+<td>13</td>
+<td>INC DE</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=0, p=1</td>
+</tr>
+<tr>
+<td>14</td>
+<td>INC D</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>15</td>
+<td>DEC D</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>16</td>
+<td>LD D,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>17</td>
+<td>RLA</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=2 + <code>rl8()</code></td>
+</tr>
+<tr>
+<td>18</td>
+<td>JR d</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=3</td>
+</tr>
+<tr>
+<td>19</td>
+<td>ADD HL,DE</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=1 + <code>add16()</code></td>
+</tr>
+<tr>
+<td>1A</td>
+<td>LD A,(DE)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=3</td>
+</tr>
+<tr>
+<td>1B</td>
+<td>DEC DE</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=1, p=1</td>
+</tr>
+<tr>
+<td>1C</td>
+<td>INC E</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>1D</td>
+<td>DEC E</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>1E</td>
+<td>LD E,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>1F</td>
+<td>RRA</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=3 + <code>rr8()</code></td>
+</tr>
+<tr>
+<td>20</td>
+<td>JR NZ,d</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=4 + <code>testCondition()</code></td>
+</tr>
+<tr>
+<td>21</td>
+<td>LD HL,nn</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=0, p=2</td>
+</tr>
+<tr>
+<td>22</td>
+<td>LD (nn),HL</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=4</td>
+</tr>
+<tr>
+<td>23</td>
+<td>INC HL</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=0, p=2</td>
+</tr>
+<tr>
+<td>24</td>
+<td>INC H</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>25</td>
+<td>DEC H</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>26</td>
+<td>LD H,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>27</td>
+<td>DAA</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=4 + <code>daa()</code></td>
+</tr>
+<tr>
+<td>28</td>
+<td>JR Z,d</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=5 + <code>testCondition()</code></td>
+</tr>
+<tr>
+<td>29</td>
+<td>ADD HL,HL</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=1 + <code>add16()</code></td>
+</tr>
+<tr>
+<td>2A</td>
+<td>LD HL,(nn)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=5</td>
+</tr>
+<tr>
+<td>2B</td>
+<td>DEC HL</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=1, p=2</td>
+</tr>
+<tr>
+<td>2C</td>
+<td>INC L</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>2D</td>
+<td>DEC L</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>2E</td>
+<td>LD L,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>2F</td>
+<td>CPL</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=5 (X/Y from A)</td>
+</tr>
+<tr>
+<td>30</td>
+<td>JR NC,d</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=6 + <code>testCondition()</code></td>
+</tr>
+<tr>
+<td>31</td>
+<td>LD SP,nn</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=0, p=3</td>
+</tr>
+<tr>
+<td>32</td>
+<td>LD (nn),A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=6</td>
+</tr>
+<tr>
+<td>33</td>
+<td>INC SP</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=0, p=3</td>
+</tr>
+<tr>
+<td>34</td>
+<td>INC (HL)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4, y=6 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>35</td>
+<td>DEC (HL)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5, y=6 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>36</td>
+<td>LD (HL),n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6, y=6</td>
+</tr>
+<tr>
+<td>37</td>
+<td>SCF</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=6 (X/Y from A)</td>
+</tr>
+<tr>
+<td>38</td>
+<td>JR C,d</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 0, y=7 + <code>testCondition()</code></td>
+</tr>
+<tr>
+<td>39</td>
+<td>ADD HL,SP</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 1, q=1 + <code>add16()</code></td>
+</tr>
+<tr>
+<td>3A</td>
+<td>LD A,(nn)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 2, y=7</td>
+</tr>
+<tr>
+<td>3B</td>
+<td>DEC SP</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 3, q=1, p=3</td>
+</tr>
+<tr>
+<td>3C</td>
+<td>INC A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 4 + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>3D</td>
+<td>DEC A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 5 + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>3E</td>
+<td>LD A,n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 6</td>
+</tr>
+<tr>
+<td>3F</td>
+<td>CCF</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock0()</code> case 7, y=7 (X/Y from A)</td>
+</tr>
+<tr>
+<td>40-75,77-7F</td>
+<td>LD r,r'</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock1()</code></td>
+</tr>
+<tr>
+<td>76</td>
+<td>HALT</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock1()</code> opcode=0x76</td>
+</tr>
+<tr>
+<td>80-87</td>
+<td>ADD A,r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=0 + <code>add8()</code></td>
+</tr>
+<tr>
+<td>88-8F</td>
+<td>ADC A,r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=1 + <code>adc8()</code></td>
+</tr>
+<tr>
+<td>90-97</td>
+<td>SUB r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=2 + <code>sub8()</code></td>
+</tr>
+<tr>
+<td>98-9F</td>
+<td>SBC A,r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=3 + <code>sbc8()</code></td>
+</tr>
+<tr>
+<td>A0-A7</td>
+<td>AND r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=4 + <code>and8()</code></td>
+</tr>
+<tr>
+<td>A8-AF</td>
+<td>XOR r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=5 + <code>xor8()</code></td>
+</tr>
+<tr>
+<td>B0-B7</td>
+<td>OR r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=6 + <code>or8()</code></td>
+</tr>
+<tr>
+<td>B8-BF</td>
+<td>CP r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock2()</code> y=7 + <code>cp8()</code> (X/Y from operand)</td>
+</tr>
+<tr>
+<td>C0-FF</td>
+<td>Various</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeBlock3()</code> all cases</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cb-prefixed-instructions">CB-Prefixed Instructions</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode Range</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CB 00-07</td>
+<td>RLC r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=0 + <code>rlc8()</code></td>
+</tr>
+<tr>
+<td>CB 08-0F</td>
+<td>RRC r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=1 + <code>rrc8()</code></td>
+</tr>
+<tr>
+<td>CB 10-17</td>
+<td>RL r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=2 + <code>rl8()</code></td>
+</tr>
+<tr>
+<td>CB 18-1F</td>
+<td>RR r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=3 + <code>rr8()</code></td>
+</tr>
+<tr>
+<td>CB 20-27</td>
+<td>SLA r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=4 + <code>sla8()</code></td>
+</tr>
+<tr>
+<td>CB 28-2F</td>
+<td>SRA r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=5 + <code>sra8()</code></td>
+</tr>
+<tr>
+<td>CB 30-37</td>
+<td>SLL r</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>executeCB()</code> x=0, y=6 + <code>sll8()</code></td>
+</tr>
+<tr>
+<td>CB 38-3F</td>
+<td>SRL r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=0, y=7 + <code>srl8()</code></td>
+</tr>
+<tr>
+<td>CB 40-7F</td>
+<td>BIT n,r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=1 + <code>bit()</code> (WZ properly set for (HL), X/Y from WZ high)</td>
+</tr>
+<tr>
+<td>CB 80-BF</td>
+<td>RES n,r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=2</td>
+</tr>
+<tr>
+<td>CB C0-FF</td>
+<td>SET n,r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeCB()</code> x=3</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ed-prefixed-instructions">ED-Prefixed Instructions</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ED 00-3F</td>
+<td>Undefined</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeED()</code> explicit switch cases</td>
+</tr>
+<tr>
+<td>ED 40</td>
+<td>IN B,(C)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=0, y=0</td>
+</tr>
+<tr>
+<td>ED 41</td>
+<td>OUT (C),B</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=1, y=0</td>
+</tr>
+<tr>
+<td>ED 42</td>
+<td>SBC HL,BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=2, q=0 + <code>sbc16()</code></td>
+</tr>
+<tr>
+<td>ED 43</td>
+<td>LD (nn),BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=3, q=0</td>
+</tr>
+<tr>
+<td>ED 44</td>
+<td>NEG</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=4 + <code>neg()</code></td>
+</tr>
+<tr>
+<td>ED 45</td>
+<td>RETN</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=5 (IFF2→IFF1)</td>
+</tr>
+<tr>
+<td>ED 46</td>
+<td>IM 0</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=6, y=0</td>
+</tr>
+<tr>
+<td>ED 47</td>
+<td>LD I,A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=7, y=0</td>
+</tr>
+<tr>
+<td>ED 48</td>
+<td>IN C,(C)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=0, y=1</td>
+</tr>
+<tr>
+<td>ED 49</td>
+<td>OUT (C),C</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=1, y=1</td>
+</tr>
+<tr>
+<td>ED 4A</td>
+<td>ADC HL,BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=2, q=1 + <code>adc16()</code></td>
+</tr>
+<tr>
+<td>ED 4B</td>
+<td>LD BC,(nn)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=3, q=1</td>
+</tr>
+<tr>
+<td>ED 4C</td>
+<td>NEG</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> duplicate handling</td>
+</tr>
+<tr>
+<td>ED 4D</td>
+<td>RETI</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=5</td>
+</tr>
+<tr>
+<td>ED 4E</td>
+<td>IM 0/1</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> duplicate handling</td>
+</tr>
+<tr>
+<td>ED 4F</td>
+<td>LD R,A</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> x=1, z=7, y=1</td>
+</tr>
+<tr>
+<td>ED 50-5F</td>
+<td>Various</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> all implemented</td>
+</tr>
+<tr>
+<td>ED 60-6F</td>
+<td>Various</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> all implemented</td>
+</tr>
+<tr>
+<td>ED 67</td>
+<td>RRD</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> + <code>rrd()</code></td>
+</tr>
+<tr>
+<td>ED 6F</td>
+<td>RLD</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> + <code>rld()</code></td>
+</tr>
+<tr>
+<td>ED 70-7F</td>
+<td>Various</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeED()</code> all implemented</td>
+</tr>
+<tr>
+<td>ED 80-9F</td>
+<td>Undefined</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeED()</code> explicit switch cases</td>
+</tr>
+<tr>
+<td>ED A0</td>
+<td>LDI</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>ldi()</code> with complex X/Y flag calculation</td>
+</tr>
+<tr>
+<td>ED A1</td>
+<td>CPI</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>cpi()</code> with complex X/Y flag calculation</td>
+</tr>
+<tr>
+<td>ED A2</td>
+<td>INI</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>ini()</code> with full undocumented flag behavior</td>
+</tr>
+<tr>
+<td>ED A3</td>
+<td>OUTI</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>outi()</code> with full undocumented flag behavior</td>
+</tr>
+<tr>
+<td>ED A4-A7</td>
+<td>Undefined</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeED()</code> explicit switch cases</td>
+</tr>
+<tr>
+<td>ED A8</td>
+<td>LDD</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>ldd()</code> with complex X/Y flag calculation</td>
+</tr>
+<tr>
+<td>ED A9</td>
+<td>CPD</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>cpd()</code> with complex X/Y flag calculation</td>
+</tr>
+<tr>
+<td>ED AA</td>
+<td>IND</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>ind()</code> with full undocumented flag behavior</td>
+</tr>
+<tr>
+<td>ED AB</td>
+<td>OUTD</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>outd()</code> with full undocumented flag behavior</td>
+</tr>
+<tr>
+<td>ED AC-AF</td>
+<td>Undefined</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeED()</code> explicit switch cases</td>
+</tr>
+<tr>
+<td>ED B0</td>
+<td>LDIR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>ldir()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED B1</td>
+<td>CPIR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>cpir()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED B2</td>
+<td>INIR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>inir()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED B3</td>
+<td>OTIR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>otir()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED B4-B7</td>
+<td>Undefined</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeED()</code> explicit switch cases</td>
+</tr>
+<tr>
+<td>ED B8</td>
+<td>LDDR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>lddr()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED B9</td>
+<td>CPDR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>cpdr()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED BA</td>
+<td>INDR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>indr()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED BB</td>
+<td>OTDR</td>
+<td>✅</td>
+<td>ENHANCED</td>
+<td><code>otdr()</code> with repeat logic and R increment</td>
+</tr>
+<tr>
+<td>ED BC-FF</td>
+<td>Undefined</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeED()</code> explicit switch cases</td>
+</tr>
+</tbody>
+</table>
+<h2 id="dd-prefixed-ix-instructions">DD-Prefixed (IX) Instructions</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DD 09</td>
+<td>ADD IX,BC</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 19</td>
+<td>ADD IX,DE</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 21</td>
+<td>LD IX,nn</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 22</td>
+<td>LD (nn),IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 23</td>
+<td>INC IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 24</td>
+<td>INC IXH</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code> + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>DD 25</td>
+<td>DEC IXH</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code> + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>DD 26</td>
+<td>LD IXH,n</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code></td>
+</tr>
+<tr>
+<td>DD 29</td>
+<td>ADD IX,IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 2A</td>
+<td>LD IX,(nn)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 2B</td>
+<td>DEC IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 2C</td>
+<td>INC IXL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code> + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>DD 2D</td>
+<td>DEC IXL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code> + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>DD 2E</td>
+<td>LD IXL,n</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code></td>
+</tr>
+<tr>
+<td>DD 34</td>
+<td>INC (IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDD()</code> special case handling</td>
+</tr>
+<tr>
+<td>DD 35</td>
+<td>DEC (IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDD()</code> special case handling</td>
+</tr>
+<tr>
+<td>DD 36</td>
+<td>LD (IX+d),n</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDD()</code> special case handling</td>
+</tr>
+<tr>
+<td>DD 39</td>
+<td>ADD IX,SP</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD 44-45,4C-4D,54-55,5C-5D,60-65,67-6D</td>
+<td>LD with IXH/IXL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code> full register access</td>
+</tr>
+<tr>
+<td>DD 46-7E</td>
+<td>LD r,(IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDD()</code> special case handling</td>
+</tr>
+<tr>
+<td>DD 70-77</td>
+<td>LD (IX+d),r</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDD()</code> special case handling</td>
+</tr>
+<tr>
+<td>DD 84-85,8C-8D,94-95,9C-9D,A4-A5,AC-AD,B4-B5,BC-BD</td>
+<td>ALU with IXH/IXL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIXHIXL()</code> full ALU operations</td>
+</tr>
+<tr>
+<td>DD 86-BE</td>
+<td>ALU ops (IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDD()</code> special case handling</td>
+</tr>
+<tr>
+<td>DD CB</td>
+<td>DDCB prefix</td>
+<td>✅</td>
+<td>HANDLED</td>
+<td><code>executeDD()</code> → <code>executeDDCB()</code></td>
+</tr>
+<tr>
+<td>DD DD</td>
+<td>Double DD</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeDD()</code> returns 4</td>
+</tr>
+<tr>
+<td>DD E1</td>
+<td>POP IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD E3</td>
+<td>EX (SP),IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD E5</td>
+<td>PUSH IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD E9</td>
+<td>JP (IX)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD ED</td>
+<td>ED after DD</td>
+<td>✅</td>
+<td>HANDLED</td>
+<td><code>executeDD()</code> → <code>executeED()</code> + 4</td>
+</tr>
+<tr>
+<td>DD F9</td>
+<td>LD SP,IX</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDInstruction()</code> with HL substitution</td>
+</tr>
+<tr>
+<td>DD FD</td>
+<td>FD after DD</td>
+<td>✅</td>
+<td>HANDLED</td>
+<td><code>executeDD()</code> → <code>executeFD()</code> + 4</td>
+</tr>
+</tbody>
+</table>
+<h2 id="fd-prefixed-iy-instructions">FD-Prefixed (IY) Instructions</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FD 24</td>
+<td>INC IYH</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code> + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>FD 25</td>
+<td>DEC IYH</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code> + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>FD 26</td>
+<td>LD IYH,n</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code></td>
+</tr>
+<tr>
+<td>FD 2C</td>
+<td>INC IYL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code> + <code>inc8()</code></td>
+</tr>
+<tr>
+<td>FD 2D</td>
+<td>DEC IYL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code> + <code>dec8()</code></td>
+</tr>
+<tr>
+<td>FD 2E</td>
+<td>LD IYL,n</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code></td>
+</tr>
+<tr>
+<td>FD 44-45,4C-4D,54-55,5C-5D,60-65,67-6D</td>
+<td>LD with IYH/IYL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code> full register access</td>
+</tr>
+<tr>
+<td>FD 84-85,8C-8D,94-95,9C-9D,A4-A5,AC-AD,B4-B5,BC-BD</td>
+<td>ALU with IYH/IYL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>handleIYHIYL()</code> full ALU operations</td>
+</tr>
+<tr>
+<td>FD 09-F9</td>
+<td>All IY ops</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeFD()</code> mirrors <code>executeDD()</code> logic</td>
+</tr>
+<tr>
+<td>FD CB</td>
+<td>FDCB prefix</td>
+<td>✅</td>
+<td>HANDLED</td>
+<td><code>executeFD()</code> → <code>executeFDCB()</code></td>
+</tr>
+<tr>
+<td>FD DD</td>
+<td>DD after FD</td>
+<td>✅</td>
+<td>HANDLED</td>
+<td><code>executeFD()</code> → <code>executeDD()</code> + 4</td>
+</tr>
+<tr>
+<td>FD ED</td>
+<td>ED after FD</td>
+<td>✅</td>
+<td>HANDLED</td>
+<td><code>executeFD()</code> → <code>executeED()</code> + 4</td>
+</tr>
+<tr>
+<td>FD FD</td>
+<td>Double FD</td>
+<td>✅</td>
+<td>NOP</td>
+<td><code>executeFD()</code> returns 4</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ddcb-prefixed-instructions">DDCB-Prefixed Instructions</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode Range</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DDCB d 00-3F</td>
+<td>Shift/Rotate (IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDCBOperation()</code> x=0</td>
+</tr>
+<tr>
+<td>DDCB d 40-7F</td>
+<td>BIT n,(IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDCBOperation()</code> x=1 (X/Y from WZ high)</td>
+</tr>
+<tr>
+<td>DDCB d 80-BF</td>
+<td>RES n,(IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDCBOperation()</code> x=2</td>
+</tr>
+<tr>
+<td>DDCB d C0-FF</td>
+<td>SET n,(IX+d)</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDCBOperation()</code> x=3</td>
+</tr>
+<tr>
+<td>DDCB undoc</td>
+<td>Register copy</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>executeDDFDCBOperation()</code> copies result to register</td>
+</tr>
+</tbody>
+</table>
+<h2 id="fdcb-prefixed-instructions">FDCB-Prefixed Instructions</h2>
+<table>
+<thead>
+<tr>
+<th>Opcode Range</th>
+<th>Instruction</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FDCB d 00-FF</td>
+<td>All (IY+d) bit ops</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>executeDDFDCBOperation()</code></td>
+</tr>
+<tr>
+<td>FDCB undoc</td>
+<td>Register copy</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td><code>executeDDFDCBOperation()</code> copies result to register</td>
+</tr>
+</tbody>
+</table>
+<h2 id="support-functions">Support Functions</h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Purpose</th>
+<th>File</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>execute()</code></td>
+<td>Main instruction decoder</td>
+<td>decode.go</td>
+<td>Tracks prefix for verification</td>
+</tr>
+<tr>
+<td><code>executeBlock0()</code></td>
+<td>Opcodes 0x00-0x3F decoder</td>
+<td>decode.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>executeBlock1()</code></td>
+<td>Opcodes 0x40-0x7F decoder</td>
+<td>decode.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>executeBlock2()</code></td>
+<td>Opcodes 0x80-0xBF decoder</td>
+<td>decode.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>executeBlock3()</code></td>
+<td>Opcodes 0xC0-0xFF decoder</td>
+<td>decode.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>executeCB()</code></td>
+<td>CB prefix handler</td>
+<td>prefix_cb.go</td>
+<td>Fixed: WZ set for (HL), X/Y from WZ high for BIT</td>
+</tr>
+<tr>
+<td><code>executeED()</code></td>
+<td>ED prefix handler</td>
+<td>prefix_ed.go</td>
+<td>Comprehensive undefined opcode handling</td>
+</tr>
+<tr>
+<td><code>executeDD()</code></td>
+<td>DD prefix handler</td>
+<td>prefix_ddfd.go</td>
+<td>Full IXH/IXL register access implemented</td>
+</tr>
+<tr>
+<td><code>executeFD()</code></td>
+<td>FD prefix handler</td>
+<td>prefix_ddfd.go</td>
+<td>Full IYH/IYL register access implemented</td>
+</tr>
+<tr>
+<td><code>executeDDCB()</code></td>
+<td>DDCB prefix handler</td>
+<td>prefix_ddfd.go</td>
+<td>R not incremented (correct - not M1)</td>
+</tr>
+<tr>
+<td><code>executeFDCB()</code></td>
+<td>FDCB prefix handler</td>
+<td>prefix_ddfd.go</td>
+<td>R not incremented (correct - not M1)</td>
+</tr>
+<tr>
+<td><code>executeDDFDInstruction()</code></td>
+<td>IX/IY instruction executor</td>
+<td>prefix_ddfd.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>executeDDFDCBOperation()</code></td>
+<td>DDCB/FDCB operation executor</td>
+<td>prefix_ddfd.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>executeBlockInstruction()</code></td>
+<td>ED block instruction dispatcher</td>
+<td>prefix_ed.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>handleIXHIXL()</code></td>
+<td>IXH/IXL register access</td>
+<td>prefix_ddfd.go</td>
+<td>Full implementation</td>
+</tr>
+<tr>
+<td><code>handleIYHIYL()</code></td>
+<td>IYH/IYL register access</td>
+<td>prefix_ddfd.go</td>
+<td>Full implementation</td>
+</tr>
+<tr>
+<td><code>getRegisterForIX()</code></td>
+<td>IX register mapping</td>
+<td>prefix_ddfd.go</td>
+<td>Maps H→IXH, L→IXL</td>
+</tr>
+<tr>
+<td><code>getRegisterForIY()</code></td>
+<td>IY register mapping</td>
+<td>prefix_ddfd.go</td>
+<td>Maps H→IYH, L→IYL</td>
+</tr>
+<tr>
+<td><code>getIXHIXLCycles()</code></td>
+<td>IXH/IXL timing</td>
+<td>prefix_ddfd.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>getIYHIYLCycles()</code></td>
+<td>IYH/IYL timing</td>
+<td>prefix_ddfd.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>add8()</code>, <code>adc8()</code>, <code>sub8()</code>, <code>sbc8()</code></td>
+<td>8-bit arithmetic</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from result</td>
+</tr>
+<tr>
+<td><code>and8()</code>, <code>or8()</code>, <code>xor8()</code></td>
+<td>8-bit logic</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from result</td>
+</tr>
+<tr>
+<td><code>cp8()</code></td>
+<td>Compare</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from operand</td>
+</tr>
+<tr>
+<td><code>inc8()</code>, <code>dec8()</code></td>
+<td>8-bit increment/decrement</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from result</td>
+</tr>
+<tr>
+<td><code>add16()</code>, <code>adc16()</code>, <code>sbc16()</code></td>
+<td>16-bit arithmetic</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from high byte, WZ=HL+1</td>
+</tr>
+<tr>
+<td><code>rlc8()</code>, <code>rrc8()</code>, <code>rl8()</code>, <code>rr8()</code></td>
+<td>Rotation operations</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from result</td>
+</tr>
+<tr>
+<td><code>sla8()</code>, <code>sra8()</code>, <code>sll8()</code>, <code>srl8()</code></td>
+<td>Shift operations</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from result</td>
+</tr>
+<tr>
+<td><code>daa()</code></td>
+<td>Decimal adjust</td>
+<td>alu.go</td>
+<td>Fixed: X/Y from result</td>
+</tr>
+<tr>
+<td><code>neg()</code></td>
+<td>Negate accumulator</td>
+<td>prefix_ed.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>rrd()</code>, <code>rld()</code></td>
+<td>Rotate decimal</td>
+<td>prefix_ed.go</td>
+<td>X/Y from A, WZ=HL+1</td>
+</tr>
+<tr>
+<td><code>bit()</code></td>
+<td>Bit test</td>
+<td>prefix_cb.go</td>
+<td>X/Y from value (overridden for (HL))</td>
+</tr>
+<tr>
+<td><code>ldi()</code>, <code>ldd()</code>, <code>ldir()</code>, <code>lddr()</code></td>
+<td>Block transfer</td>
+<td>prefix_ed.go</td>
+<td>Enhanced: Complex X/Y flag calculation</td>
+</tr>
+<tr>
+<td><code>cpi()</code>, <code>cpd()</code>, <code>cpir()</code>, <code>cpdr()</code></td>
+<td>Block search</td>
+<td>prefix_ed.go</td>
+<td>Enhanced: Complex X/Y flag calculation</td>
+</tr>
+<tr>
+<td><code>ini()</code>, <code>ind()</code>, <code>inir()</code>, <code>indr()</code></td>
+<td>Block input</td>
+<td>prefix_ed.go</td>
+<td>Enhanced: Full undocumented flag behavior</td>
+</tr>
+<tr>
+<td><code>outi()</code>, <code>outd()</code>, <code>otir()</code>, <code>otdr()</code></td>
+<td>Block output</td>
+<td>prefix_ed.go</td>
+<td>Enhanced: Full undocumented flag behavior</td>
+</tr>
+<tr>
+<td><code>testCondition()</code></td>
+<td>Conditional test</td>
+<td>z80.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>getRegister8()</code></td>
+<td>Register access</td>
+<td>decode.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>involvesHL()</code></td>
+<td>HL instruction check</td>
+<td>prefix_ddfd.go</td>
+<td>Correctly identifies HL-using instructions</td>
+</tr>
+<tr>
+<td><code>parity()</code></td>
+<td>Parity calculation</td>
+<td>alu.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>push()</code>, <code>pop()</code></td>
+<td>Stack operations</td>
+<td>z80.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>fetchByte()</code>, <code>fetchWord()</code></td>
+<td>Memory fetch</td>
+<td>z80.go</td>
+<td>Supports Mode 0 buffer</td>
+</tr>
+<tr>
+<td><code>readWord()</code>, <code>writeWord()</code></td>
+<td>Memory access</td>
+<td>z80.go</td>
+<td></td>
+</tr>
+<tr>
+<td><code>handleInterrupts()</code></td>
+<td>Interrupt handler</td>
+<td>z80.go</td>
+<td>Full Mode 0 with instruction buffer</td>
+</tr>
+<tr>
+<td><code>executeMode0Instruction()</code></td>
+<td>Mode 0 executor</td>
+<td>z80.go</td>
+<td>Two-phase execution</td>
+</tr>
+<tr>
+<td><code>VerifyInstructionTiming()</code></td>
+<td>Cycle verification</td>
+<td>timing_fixes.go</td>
+<td>Called when DEBUG_TIMING=true</td>
+</tr>
+</tbody>
+</table>
+<h2 id="special-registers-and-features">Special Registers and Features</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A,F,B,C,D,E,H,L</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields in Z80 struct</td>
+</tr>
+<tr>
+<td>A',F',B',C',D',E',H',L'</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields in Z80 struct</td>
+</tr>
+<tr>
+<td>IXH,IXL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td>Direct fields, full opcode access via DD prefix</td>
+</tr>
+<tr>
+<td>IYH,IYL</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td>Direct fields, full opcode access via FD prefix</td>
+</tr>
+<tr>
+<td>I,R</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields, R increments on M1</td>
+</tr>
+<tr>
+<td>SP,PC</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields in Z80 struct</td>
+</tr>
+<tr>
+<td>WZ (MEMPTR)</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct field, properly maintained</td>
+</tr>
+<tr>
+<td>IFF1,IFF2</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields in Z80 struct</td>
+</tr>
+<tr>
+<td>IM</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct field in Z80 struct</td>
+</tr>
+<tr>
+<td>Halted</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct field in Z80 struct</td>
+</tr>
+<tr>
+<td>pendingEI,pendingDI</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields in Z80 struct</td>
+</tr>
+<tr>
+<td>NMI,INT</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Direct fields in Z80 struct</td>
+</tr>
+<tr>
+<td>nmiEdge</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Edge detection for NMI</td>
+</tr>
+<tr>
+<td>mode0Buffer</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Instruction buffer for Mode 0</td>
+</tr>
+<tr>
+<td>mode0Index</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Current position in Mode 0 buffer</td>
+</tr>
+<tr>
+<td>mode0Active</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Mode 0 execution state</td>
+</tr>
+<tr>
+<td>M1Hook</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Debug hook for M1 cycles</td>
+</tr>
+</tbody>
+</table>
+<h2 id="interrupt-implementation">Interrupt Implementation</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Function Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NMI handling</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>handleInterrupts()</code> edge-triggered</td>
+</tr>
+<tr>
+<td>INT Mode 0</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>handleInterrupts()</code> with InterruptController interface</td>
+</tr>
+<tr>
+<td>INT Mode 1</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>handleInterrupts()</code> jumps to 0x0038</td>
+</tr>
+<tr>
+<td>INT Mode 2</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>handleInterrupts()</code> vectored via I register</td>
+</tr>
+<tr>
+<td>EI delay</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>Step()</code> with pendingEI flag</td>
+</tr>
+<tr>
+<td>DI delay</td>
+<td>✅</td>
+<td>FULL</td>
+<td><code>Step()</code> with pendingDI flag</td>
+</tr>
+<tr>
+<td>R increment on INT</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Incremented for interrupt acknowledge M1</td>
+</tr>
+</tbody>
+</table>
+<h2 id="flag-implementation">Flag Implementation</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Bit</th>
+<th>Coverage</th>
+<th>Implementation</th>
+<th>Functions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Carry (C)</td>
+<td>0</td>
+<td>✅</td>
+<td>FULL</td>
+<td>All ALU functions</td>
+</tr>
+<tr>
+<td>Add/Subtract (N)</td>
+<td>1</td>
+<td>✅</td>
+<td>FULL</td>
+<td>All ALU functions</td>
+</tr>
+<tr>
+<td>Parity/Overflow (P/V)</td>
+<td>2</td>
+<td>✅</td>
+<td>FULL</td>
+<td>Context-dependent in ALU</td>
+</tr>
+<tr>
+<td>X (undocumented)</td>
+<td>3</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td>Correct behavior throughout</td>
+</tr>
+<tr>
+<td>Half-carry (H)</td>
+<td>4</td>
+<td>✅</td>
+<td>FULL</td>
+<td>All ALU functions</td>
+</tr>
+<tr>
+<td>Y (undocumented)</td>
+<td>5</td>
+<td>✅</td>
+<td>UNDOC</td>
+<td>Correct behavior throughout</td>
+</tr>
+<tr>
+<td>Zero (Z)</td>
+<td>6</td>
+<td>✅</td>
+<td>FULL</td>
+<td>All ALU functions</td>
+</tr>
+<tr>
+<td>Sign (S)</td>
+<td>7</td>
+<td>✅</td>
+<td>FULL</td>
+<td>All ALU functions</td>
+</tr>
+</tbody>
+</table>
+<h2 id="test-coverage-analysis">Test Coverage Analysis</h2>
+<table>
+<thead>
+<tr>
+<th>Test Category</th>
+<th>Status</th>
+<th>Coverage</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unit Tests</td>
+<td>✅</td>
+<td>Comprehensive</td>
+<td>All instruction groups tested</td>
+</tr>
+<tr>
+<td>Flag Tests</td>
+<td>✅</td>
+<td>Complete</td>
+<td>Including undocumented X/Y flags</td>
+</tr>
+<tr>
+<td>Timing Tests</td>
+<td>✅</td>
+<td>Extensive</td>
+<td>Conditional branches, block ops</td>
+</tr>
+<tr>
+<td>Interrupt Tests</td>
+<td>✅</td>
+<td>Full</td>
+<td>All modes, EI delay, HALT interaction</td>
+</tr>
+<tr>
+<td>Prefix Tests</td>
+<td>✅</td>
+<td>Complete</td>
+<td>DD/FD/ED/CB and combinations</td>
+</tr>
+<tr>
+<td>Block Op Tests</td>
+<td>✅</td>
+<td>Enhanced</td>
+<td>Complex flag calculations verified</td>
+</tr>
+<tr>
+<td>Integration Tests</td>
+<td>✅</td>
+<td>Multiple</td>
+<td>ZEXDOC, Spectrum ROM</td>
+</tr>
+<tr>
+<td>Edge Cases</td>
+<td>✅</td>
+<td>Well covered</td>
+<td>R register, WZ, prefix chains</td>
+</tr>
+</tbody>
+</table>
+<h2 id="performance-and-quality-metrics">Performance and Quality Metrics</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Status</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Instruction Coverage</td>
+<td>100%</td>
+<td>All documented Z80 instructions</td>
+</tr>
+<tr>
+<td>Undocumented Coverage</td>
+<td>High</td>
+<td>Major undocumented features implemented</td>
+</tr>
+<tr>
+<td>Test Pass Rate</td>
+<td>100%</td>
+<td>All unit tests passing</td>
+</tr>
+<tr>
+<td>ZEXDOC Compatibility</td>
+<td>✅</td>
+<td>Runs CP/M test suite</td>
+</tr>
+<tr>
+<td>Spectrum ROM Boot</td>
+<td>✅</td>
+<td>Successfully boots 48K and 128K ROMs</td>
+</tr>
+<tr>
+<td>Debugging Support</td>
+<td>✅</td>
+<td>M1 hooks, cycle verification</td>
+</tr>
+</tbody>
+</table>
+<h2 id="summary">Summary</h2>
+<p>The zen80 Z80 emulator has evolved into a mature, comprehensive implementation with:
+- <strong>Complete instruction set</strong>: All documented instructions plus major undocumented features
+- <strong>Accurate flag handling</strong>: Including proper X/Y flag behavior for all cases
+- <strong>Full interrupt support</strong>: All three modes with correct behavior
+- <strong>Extensive testing</strong>: Unit tests, integration tests, and real-world ROM execution</p>
+<p>The emulator successfully runs both synthetic test suites (ZEXDOC) and real-world software (Spectrum ROMs), demonstrating both theoretical correctness and practical compatibility.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

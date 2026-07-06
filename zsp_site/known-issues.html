@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known Issues — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="index.html#projects">Projects</a>
+<a href="known-issues.html" class="active">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="index.html">&larr; back home</a>
+<article class="doc-body">
+<h1 id="known-issues-running-notes-for-zsp">Known issues — running notes for zsp</h1>
+<p>Tracking document for problems found while working across the projects under
+the Zen Spectrum Project umbrella. Not published anywhere yet — this is the
+holding pen until the zsp site exists, at which point each entry below moves
+to that project's page (fixed items as changelog/notes, open items as known
+limitations).</p>
+<p>Status markers: <span class="status-fixed">✓</span> fixed · <span class="status-open">☐</span> open/flagged · <span class="status-decided">☑</span> resolved by decision (e.g. removal)</p>
+<hr />
+<h2 id="zentools">zentools</h2>
+<p>No issues found so far (build <span class="status-fixed">✓</span>, vet <span class="status-fixed">✓</span>, test <span class="status-fixed">✓</span>, HEAD <code>fb679a2</code>, v0.5.0).</p>
+<h2 id="zen80">zen80</h2>
+<p><strong><span class="status-open">☐</span> ZEXALL/ZEXDOC exhaustive exercisers cannot be verified in a constrained environment.</strong>
+<code>TestZEXALL_CPMSim_BDOS_PCTrap</code> and <code>TestZEX_CPMSim_BDOS_PCTrap</code> run for
+several minutes on real completion. Their own "silent loop" bailout
+thresholds (and the dedicated <code>TestZEXALL_QuickCheck</code>'s 100M-op budget) are
+set below what even the first exhaustive subtest
+(<code>&lt;adc,sbc&gt; hl,&lt;bc,de,hl,sp&gt;....</code>) needs to produce output, so any run bounded
+to sandbox-feasible time reports a stall. This is a test-harness/environment
+limitation, not evidence of a Z80 core defect — but it also means the core
+hasn't actually been confirmed correct by these suites in any session so far.
+<strong>Needs a full local run to completion to confirm one way or the other.</strong>
+(HEAD <code>bd22cfb</code>, v0.1.0+1)</p>
+<h2 id="zenzx">zenzx</h2>
+<p><strong><span class="status-fixed">✓</span> Fixed — snapshot retrieval bug (released, v0.4.2).</strong>
+Snapshots saved after loading a screen directly (e.g. a <code>.scr</code>) captured a
+blank screen: the border restored correctly but the bitmap didn't, because
+<code>toMachineState</code> encoded stale RAM instead of the authoritative display
+buffers. Fixed by copying the buffers into the correct bank before encoding,
+mirroring <code>resyncAfterLoad</code>. Already released as part of v0.4.2 — found by
+Horacio while prepping that release.</p>
+<p><strong><span class="status-fixed">✓</span> Fixed — unkeyed raylib struct literals (session fix, not yet released).</strong>
+<code>go vet</code> flagged unkeyed <code>rl.Rectangle</code>/<code>rl.Vector2</code> literals in
+<code>display.go</code>. Keyed them to match the style already used elsewhere in the
+same function. Cosmetic/hygiene only, no behavioural change. (HEAD <code>f84a239</code>
++ local fix, v0.4.2)</p>
+<h2 id="zenas">zenas</h2>
+<p>No issues found so far (build <span class="status-fixed">✓</span>, vet <span class="status-fixed">✓</span>, test <span class="status-fixed">✓</span>, HEAD <code>97d0006</code>, v0.7.5).</p>
+<h2 id="zenimate">zenimate</h2>
+<p><strong><span class="status-fixed">✓</span> Fixed — <code>zaniplay</code> wouldn't compile (session fix, not yet released).</strong>
+<code>cmd/zaniplay/main.go</code> indexed the bit-packed <code>Frame</code> (<code>[]byte</code>) as if it
+were a plain <code>[]bool</code>. <code>Frame</code> already has a purpose-built accessor,
+<code>At(x, y, w int) bool</code>. The same mistake was duplicated in two test files
+(<code>cmd/zaniplay/load_test.go</code>, <code>cmd/zenimate-tui/keys_test.go</code>). All three
+fixed to use <code>.At(...)</code>; build/vet/test green afterwards.</p>
+<p><strong><span class="status-decided">☑</span> zaniplay slated for removal in a future version.</strong>
+<code>zaniplay</code> is absent from both <code>.github/workflows/ci.yml</code> (build/vet/test
+scoped to <code>pkg/...</code>, <code>internal/...</code>, <code>cmd/zenimate-gui/</code> only) and
+<code>release.yml</code> (only <code>zenimate-gui</code> is built for release). Horacio has
+confirmed the intent is to delete <code>cmd/zaniplay/</code> entirely in the next
+version, plus a CHANGELOG note recording the removal.</p>
+<p><strong><span class="status-open">☐</span> Open question — <code>cmd/zenimate-tui</code> has the identical CI gap.</strong>
+Same exclusion pattern as <code>zaniplay</code>, same two workflow files. Not yet
+decided whether this is heading the same way or simply hasn't been promoted
+into CI. Flagged, awaiting a decision. (HEAD <code>6e8cf43</code> + local fixes, v0.7.0)</p>
+<h2 id="plus3">plus3</h2>
+<p>No issues found so far (build <span class="status-fixed">✓</span>, vet <span class="status-fixed">✓</span>, test <span class="status-fixed">✓</span>, HEAD <code>546cede</code>, v0.9.8).</p>
+<h2 id="bdf-fonts">bdf-fonts</h2>
+<p><strong><span class="status-open">☐</span> Likely accidental duplicate file.</strong>
+<code>fonts/helvR12 copy.bdf</code> sits alongside <code>fonts/helvR12.bdf</code> — the space in
+the filename is the usual signature of an OS-level duplicate rather than an
+intentional variant. Not touched; needs a human decision on whether to
+delete it. (HEAD <code>1d6ab5c</code>, not a Go module — font/asset repo)</p>
+<hr />
+<h2 id="log">Log</h2>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Project</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-07-05</td>
+<td>zenzx</td>
+<td>Snapshot bug fixed, released as v0.4.2</td>
+</tr>
+<tr>
+<td>2026-07-05</td>
+<td>zenzx</td>
+<td>Unkeyed raylib literals fixed (vet hygiene)</td>
+</tr>
+<tr>
+<td>2026-07-05</td>
+<td>zenimate</td>
+<td>zaniplay compile bug fixed (Frame indexing)</td>
+</tr>
+<tr>
+<td>2026-07-05</td>
+<td>zenimate</td>
+<td>Decision: remove zaniplay in next version</td>
+</tr>
+<tr>
+<td>2026-07-05</td>
+<td>zenimate</td>
+<td>Flagged: zenimate-tui shares zaniplay's CI gap</td>
+</tr>
+<tr>
+<td>2026-07-05</td>
+<td>zen80</td>
+<td>ZEXALL/ZEXDOC unverifiable in sandbox — needs local run</td>
+</tr>
+<tr>
+<td>2026-07-05</td>
+<td>bdf-fonts</td>
+<td>Flagged: likely accidental duplicate font file</td>
+</tr>
+</tbody>
+</table>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zentools — architecture · zentools — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-blue);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zentools</a>
+<article class="doc-body">
+<h1 id="zentools-architecture">zentools — architecture</h1>
+<p>zentools is the canonical Go library for ZX Spectrum binary formats: tape images,
+snapshots, disk images, and BASIC tokenisation. It exists so that the tools in
+the ecosystem (zenas, zenzx, plus3, and future ones) share one verified
+implementation of each format instead of maintaining several partial,
+"sometimes badly" copies.</p>
+<p>This document defines the package layout, the public API shape, and the rules
+that keep the library reusable. It is the contract the migration builds to.</p>
+<h2 id="design-principles">Design principles</h2>
+<ol>
+<li>
+<p><strong>Formats are pure data transforms.</strong> A format package turns bytes into a
+   neutral Go value and back. It never imports an emulator, a disk runtime, or
+   any consumer. If a function needs live emulator state, it does not belong in
+   zentools — it belongs in the consumer's adapter.</p>
+</li>
+<li>
+<p><strong>In-memory first.</strong> Every codec has a <code>[]byte</code>-in / <code>[]byte</code>-out (or
+   value-out) core. File and stream helpers are thin wrappers over that core, so
+   an assembler that already holds the bytes never has to round-trip through a
+   file.</p>
+</li>
+<li>
+<p><strong>No surprise dependencies.</strong> The format packages depend only on the Go
+   standard library. Anything needing a third-party dependency (YAML config,
+   CLI parsing) lives in <code>cmd/</code>, never in <code>pkg/</code>.</p>
+</li>
+<li>
+<p><strong>A neutral machine state is the snapshot pivot.</strong> Snapshot formats encode and
+   decode to a single <code>MachineState</code> struct that describes a Spectrum's
+   registers, memory, and hardware config. Consumers adapt their own live state
+   to/from <code>MachineState</code>; the codecs never see the consumer's types.</p>
+</li>
+<li>
+<p><strong>Verified against real artifacts.</strong> Each package ships tests that check its
+   output against an independent oracle (another tool's bytes, a real program, an
+   emulator load) — not just self-consistency. Correctness is the product.</p>
+</li>
+</ol>
+<h2 id="package-layout">Package layout</h2>
+<pre><code>github.com/ha1tch/zentools
+├── pkg/
+│   ├── tap/         TAP tape images. Encode/decode CODE and Program blocks.
+│   ├── tzx/         TZX tape images. Encode (and decode) the common block set.
+│   ├── snapshot/    .zxs / .sna / .z80 via a neutral MachineState.
+│   │   ├── state.go     MachineState and its sub-structs (the pivot type)
+│   │   ├── zxs.go       chunked ZenZX format
+│   │   ├── sna.go       48K / 128K .sna
+│   │   └── z80.go       .z80 (versioned, compressed)
+│   ├── basic/       BASIC tokenise + detokenise (48K and 128K keywords).
+│   ├── build/       overlay machine code onto a boot state; emit tapes/snapshots.
+│   └── version/     library version constant.
+├── cmd/             CLI tools over the packages.
+│   ├── maketap, totap, loadtap, tap2tzx   drop-in zxgotools replacements.
+│   └── zx/          modern unified front-end (tap, tzx, basic, snap, convert, info).
+│                    third-party deps (flags) live here, not in pkg/.
+└── (hygiene: VERSION, syncver.sh, release.sh, CHANGELOG.md, .gitignore, LICENSE)
+</code></pre>
+<h2 id="format-ownership">Format ownership</h2>
+<p>A format lives in zentools if and only if its purpose is interoperability
+between tools. Formats whose value is tied to one project's identity stay native
+to that project:</p>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Owner</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.tap</code>, <code>.tzx</code></td>
+<td>zentools</td>
+<td>interchange tape formats every tool reads</td>
+</tr>
+<tr>
+<td><code>.sna</code>, <code>.z80</code></td>
+<td>zentools</td>
+<td>portable snapshot standards</td>
+</tr>
+<tr>
+<td>BASIC tokenisation</td>
+<td>zentools</td>
+<td>shared encode/decode</td>
+</tr>
+<tr>
+<td><code>.zxs</code></td>
+<td><strong>zenzx (native)</strong></td>
+<td>zenzx's proprietary chunked format; its magic and metadata are emulator-specific</td>
+</tr>
+<tr>
+<td><code>.dsk</code> (+3DOS)</td>
+<td><strong>plus3 (native)</strong></td>
+<td>mature, tested, CI-backed; zentools may depend on plus3 for disk, never the reverse</td>
+</tr>
+</tbody>
+</table>
+<p>Consequence for consumers: zenzx keeps <code>.zxs</code> but swaps its <code>.sna</code>/<code>.z80</code> for
+zentools; plus3 keeps <code>.dsk</code> but swaps its broken in-tree TAP for
+<code>zentools/pkg/tap</code>. No project loses its signature format; all share the
+interchange ones.</p>
+<h2 id="package-coupling">Package coupling</h2>
+<p>Packages do not import each other except that <code>cmd/</code> imports <code>pkg/*</code>. A format
+package importing another format package would couple them; keep them flat.
+(The one defensible exception, if it arises: a future <code>pkg/spectrum</code> holding
+shared constants like the XOR checksum or memory-map addresses. Not needed yet —
+TAP and TZX each own their small bit of shared knowledge until duplication
+actually hurts.)</p>
+<h2 id="public-api-shape-per-package">Public API shape (per package)</h2>
+<p>The naming is uniform so a consumer learns one pattern. Each format provides an
+in-memory core plus optional file/stream helpers.</p>
+<h3 id="pkgtap-built-verified">pkg/tap (built, verified)</h3>
+<pre><code class="language-go">func EncodeCode(name string, data []byte, loadAddress uint16) []byte
+func EncodeProgram(name string, data []byte, autostart uint16) []byte
+func Decode(image []byte) ([]Block, error)   // to add: parse a TAP into blocks
+func WriteCodeFile(inputPath, outputPath, name string, loadAddress uint16) error
+</code></pre>
+<p><code>Decode</code> returns typed blocks (header/data, with the header fields parsed) so a
+consumer like zenzx replaces its in-tree <code>loadTAP</code> with <code>tap.Decode</code> and then
+does its emulator-specific thing with the blocks.</p>
+<h3 id="pkgtzx">pkg/tzx</h3>
+<pre><code class="language-go">func EncodeFromTAP(tapImage []byte, opts EncodeOptions) ([]byte, error)
+func Encode(blocks []Block, opts EncodeOptions) ([]byte, error)
+func Decode(image []byte) ([]Block, error)
+</code></pre>
+<p>The writer is lifted out of zxgotools' <code>cmd/tap2tzx</code> and made dependency-free.
+<code>EncodeOptions</code> carries the metadata/hardware flags as a plain struct; JSON
+parsing into that struct stays in <code>cmd/tap2tzx</code>.</p>
+<h3 id="pkgsnapshot">pkg/snapshot</h3>
+<pre><code class="language-go">type MachineState struct {
+    Model   Model            // 48K, 128K, +2, +3
+    CPU     CPUState         // registers, including shadows, I, R, IFF, IM
+    Memory  Memory           // RAM pages (and which is paged where)
+    Paging  PagingState      // 128K paging port state
+    IO      IOState          // border, etc.
+    // Audio/FDC optional, format-permitting.
+}
+
+func EncodeZXS(s *MachineState) ([]byte, error)
+func DecodeZXS(image []byte) (*MachineState, error)
+func EncodeSNA(s *MachineState) ([]byte, error)
+func DecodeSNA(image []byte) (*MachineState, error)
+func EncodeZ80(s *MachineState) ([]byte, error)
+func DecodeZ80(image []byte) (*MachineState, error)
+</code></pre>
+<p>zenzx keeps a small adapter: <code>func (zx *ZenZX) toMachineState() *MachineState</code>
+and <code>func (zx *ZenZX) fromMachineState(s *MachineState)</code>. Its in-tree
+<code>SaveSNA</code>/<code>LoadSNA</code>/etc. become one-liners over the zentools codecs.</p>
+<h3 id="pkgbasic">pkg/basic</h3>
+<pre><code class="language-go">func Tokenise(src string, opts ...Option) ([]byte, error)
+func Detokenise(prog []byte) (string, error)
+func LooksTokenised(data []byte) bool
+</code></pre>
+<p>Both directions (zxgotools has only tokenise; plus3 has both). Options carry
+case-independence and the like (borrowed from zxgotools' parser).</p>
+<h2 id="source-provenance-and-per-package-plan">Source provenance and per-package plan</h2>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Best source</th>
+<th>Plan</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tap</code></td>
+<td>zentools (already built from zxgotools, fixed + verified)</td>
+<td>Add <code>Decode</code>; done otherwise.</td>
+</tr>
+<tr>
+<td><code>tzx</code></td>
+<td>zxgotools <code>cmd/tap2tzx</code> (writer verified this session)</td>
+<td>Factor writer out, drop YAML to cmd, add <code>Decode</code>.</td>
+</tr>
+<tr>
+<td><code>snapshot</code></td>
+<td>zenzx (only implementation)</td>
+<td>Lift <code>.sna</code>/<code>.z80</code> codecs, decouple to <code>MachineState</code>, audit/fix. <code>.zxs</code> stays native to zenzx (see Format ownership).</td>
+</tr>
+<tr>
+<td><code>basic</code></td>
+<td>plus3 (correct, both directions, tested) as base; zxgotools for architecture</td>
+<td>Reconcile. plus3 is the correctness base; borrow zxgotools' options. Fix the float-number case zxgotools' test exposes.</td>
+</tr>
+<tr>
+<td>disk (<code>.dsk</code>)</td>
+<td>plus3 <code>pkg/diskimg</code> (strong, tested, CI)</td>
+<td>NOT moved into zentools. plus3 stays the disk authority; zentools may depend on plus3 for disk, not the reverse.</td>
+</tr>
+</tbody>
+</table>
+<p>Note on disk: plus3 is mature and CI-backed at what it does. Rather than absorb
+it, the ecosystem treats plus3 as the disk-image library and zentools as the
+tape/snapshot/basic library. plus3's one weak spot — its broken in-tree TAP
+converter — is fixed by having plus3 import <code>zentools/pkg/tap</code>, which also
+removes a duplicate.</p>
+<h2 id="consumer-migration-after-packages-are-verified">Consumer migration (after packages are verified)</h2>
+<ol>
+<li><strong>plus3</strong> replaces its broken <code>convert.go</code> TAP code with <code>zentools/pkg/tap</code>
+   calls. This is a correctness fix, the highest immediate payoff.</li>
+<li><strong>zenas</strong> uses <code>pkg/tap</code> / <code>pkg/tzx</code> to emit tape output (Feature 3).</li>
+<li><strong>zenzx</strong> swaps its in-tree tape parsing and snapshot codecs for zentools +
+   thin adapters, keeping only emulator-coupled playback (pulse generation,
+   fast-inject, ROM trap). The encode→load→memory round-trip is the regression
+   gate.</li>
+</ol>
+<h2 id="verification-standard">Verification standard</h2>
+<p>Each package's tests must include at least one independent oracle:</p>
+<ul>
+<li><code>tap</code>: byte-comparison vs pasmo; structural decode; emulator load (zenzx).</li>
+<li><code>tzx</code>: structural decode; vs sjasmplus/zxgotools output; emulator load.</li>
+<li><code>snapshot</code>: round-trip (encode then decode equals input); load in a real
+  emulator; compare against a snapshot a known tool produced.</li>
+<li><code>basic</code>: round-trip (tokenise then detokenise); decode of real programs
+  (plus3's existing test corpus); the number-encoding cases.</li>
+</ul>
+<p>Self-consistency (round-trip) is necessary but not sufficient; an external
+reference is required wherever one exists.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>

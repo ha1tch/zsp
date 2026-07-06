@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zenas manual · zenas — haitch's Zen Spectrum Project</title>
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body style="--accent: var(--zx-green);">
+<header class="site-nav"><div class="wrap nav-inner">
+<a class="nav-brand" href="../../../index.html">haitch<span class="dim">/</span>zsp</a>
+<nav class="nav-links">
+<a href="../../../index.html#projects">Projects</a>
+<a href="../../../known-issues.html">Known Issues</a>
+<a href="https://github.com/ha1tch/zsp">GitHub</a>
+</nav></div></header>
+<div class="wrap doc-page">
+<a class="back" href="../index.html">&larr; back to zenas</a>
+<article class="doc-body">
+<h1 id="zenas-manual">zenas manual</h1>
+<p>zenas is a two-pass Z80 / Z80N assembler. This manual is the reference for the
+command line, the source language, the directives, and the extensions. For the
+instruction-set coverage table see <a href="instruction-set.html">INSTRUCTION_SET.md</a>; for
+the Z80N opcode details see <a href="z80n-reference.html">Z80N_REFERENCE.md</a>.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#running-zenas">Running zenas</a></li>
+<li><a href="#source-format">Source format</a></li>
+<li><a href="#numbers-and-character-literals">Numbers and character literals</a></li>
+<li><a href="#symbols-and-expressions">Symbols and expressions</a></li>
+<li><a href="#directives">Directives</a></li>
+<li><a href="#conditional-assembly">Conditional assembly</a></li>
+<li><a href="#build-tags">Build tags</a></li>
+<li><a href="#including-files">Including files</a></li>
+<li><a href="#macros">Macros</a></li>
+<li><a href="#packages">Packages</a></li>
+<li><a href="#dialect-modes">Dialect modes</a></li>
+<li><a href="#z80n-zx-spectrum-next">Z80N (ZX Spectrum Next)</a></li>
+<li><a href="#character-sets">Character sets</a></li>
+<li><a href="#output-and-reports">Output and reports</a></li>
+<li><a href="#running-and-testing-assembled-code">Running and testing assembled code</a></li>
+</ul>
+<p>For an orientation aimed at users coming from another assembler — what is
+familiar, what differs, and what zenas uniquely enables — see the
+<a href="zenas-programming.html">Zenas programming guide</a>. For a worked, build-and-test
+walkthrough using packages and the test harness, see the
+<a href="packaged-program-tutorial.html">packaged-program tutorial</a>.</p>
+<h2 id="running-zenas">Running zenas</h2>
+<pre><code>zenas assemble &lt;input.asm&gt; [output.bin] [options]   assemble to a raw binary
+zenas build    &lt;input.asm&gt; [options]                assemble and package to tape/snapshot
+zenas run      &lt;input.asm&gt; [options]                assemble and execute in the emulator
+zenas assert   &lt;input.asm&gt; --expect ... [options]   execute and check final state
+zenas test                                          run zenas's built-in self-tests
+zenas version                                        print the version
+zenas help [--all]                                   show help; --all for the full reference
+</code></pre>
+<p>If no output file is given, the input name is used with a <code>.bin</code> extension.
+<code>zenas help</code> shows the common options; <code>zenas help --all</code> shows the full
+reference. The <code>build</code> command is covered under
+<a href="#output-and-reports">Output and reports</a> (for the artifact formats) and the
+<code>run</code>/<code>assert</code> execution layer under
+<a href="#running-and-testing-assembled-code">Running and testing assembled code</a>.</p>
+<p>Options:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--next</code></td>
+<td>Enable the Z80N (ZX Spectrum Next) instruction set</td>
+</tr>
+<tr>
+<td><code>--cpu=Z80\|Z80N</code></td>
+<td>Select the CPU target (default <code>Z80</code>); <code>--cpu=Z80N</code> is the same as <code>--next</code></td>
+</tr>
+<tr>
+<td><code>--define=NAME[=VAL]</code></td>
+<td>Pre-define a symbol (default value 1); drives <code>IF</code>/<code>IFDEF</code></td>
+</tr>
+<tr>
+<td><code>--tag NAME</code></td>
+<td>Select a build tag (see <a href="#build-tags">Build tags</a>)</td>
+</tr>
+<tr>
+<td><code>--sym[=path]</code></td>
+<td>Write a pasmo-format symbol file (default <code>&lt;output&gt;.sym</code>)</td>
+</tr>
+<tr>
+<td><code>--hex</code> / <code>--no-hex</code></td>
+<td>Force or suppress the hex dump of the output</td>
+</tr>
+<tr>
+<td><code>--charset=NAME</code></td>
+<td>Character encoding for strings (see <a href="#character-sets">Character sets</a>)</td>
+</tr>
+<tr>
+<td><code>--no-warnings</code></td>
+<td>Suppress character-replacement warnings</td>
+</tr>
+<tr>
+<td><code>--json=LEVEL</code></td>
+<td>Emit a JSON report instead of a binary (see <a href="#output-and-reports">Output and reports</a>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="source-format">Source format</h2>
+<p>One statement per line. A line may have an optional label, an instruction or
+directive, and an optional comment:</p>
+<pre><code>label:          LD      A,5         ; a comment
+</code></pre>
+<ul>
+<li><strong>Labels</strong> end with a colon, or begin a line in the first column. They are
+  <strong>case-sensitive</strong> (<code>Loop</code> and <code>loop</code> are different).</li>
+<li><strong>Mnemonics, register names and directive names</strong> are case-insensitive
+  (<code>ld a,b</code> and <code>LD A,B</code> are the same).</li>
+<li><strong>Comments</strong> start with <code>;</code> and run to the end of the line.</li>
+</ul>
+<h2 id="numbers-and-character-literals">Numbers and character literals</h2>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Example</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decimal</td>
+<td><code>42</code>, <code>-1</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Hex, <code>$</code> prefix</td>
+<td><code>$2A</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Hex, <code>&amp;</code> prefix</td>
+<td><code>&amp;FF</code></td>
+<td>ZX-BASIC style; <code>&amp;</code> is <strong>not</strong> a bitwise operator here</td>
+</tr>
+<tr>
+<td>Hex, <code>H</code> suffix</td>
+<td><code>2AH</code></td>
+<td>Must start with a digit (<code>0FFH</code>, not <code>FFH</code>)</td>
+</tr>
+<tr>
+<td>Binary, <code>%</code> prefix</td>
+<td><code>%101010</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Binary, <code>B</code> suffix</td>
+<td><code>101010B</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Character</td>
+<td><code>'A'</code></td>
+<td>Evaluates to the character code in the active charset</td>
+</tr>
+</tbody>
+</table>
+<h3 id="radix-input-data-forms">Radix-input data forms</h3>
+<p>In <code>.DB</code>, <code>.DW</code>, and <code>.DM</code>, a <code>0x</code> (hex) or <code>0d</code> (decimal) marker introduces a
+run of values that the directive emits according to its own width and order. The
+marker may be glued to a run of digits, or stand alone before space-separated
+groups:</p>
+<pre><code>        DB 0x600DF00D            ; 60 0D F0 0D  (bytes, written order)
+        DB 0x 60 0D F0 0D        ; 60 0D F0 0D  (spaced hex)
+        DW 0x 600D F00D          ; 0D 60 0D F0  (words, little-endian)
+        DB 0d 96 13 240 13       ; 60 0D F0 0D  (decimal)
+</code></pre>
+<p><code>.DB</code>/<code>.DM</code> take byte-sized groups; <code>.DW</code> takes word-sized groups (little-endian).
+A group whose size or value does not fit the directive's unit is an error rather
+than being silently re-split. These forms are convenient for entering binary
+blobs (sprite data, tables, captured dumps).</p>
+<h2 id="symbols-and-expressions">Symbols and expressions</h2>
+<p>Define a constant with <code>EQU</code>:</p>
+<pre><code>WIDTH           EQU     32
+HEIGHT          EQU     24
+SIZE            EQU     WIDTH*HEIGHT
+</code></pre>
+<p>Operands and <code>EQU</code>/<code>DB</code>/<code>DW</code> values accept arithmetic expressions with <code>+</code>, <code>-</code>,
+<code>*</code>, <code>/</code> and parentheses, and may reference symbols (including forward
+references, resolved on the second pass):</p>
+<pre><code>                LD      HL,buffer+WIDTH
+                LD      A,(IX+OFFSET)
+                DW      table, table+2, table+4
+</code></pre>
+<p>Index displacements (<code>(IX+d)</code> / <code>(IY+d)</code>) accept the same expressions and are
+range-checked to a signed byte at assembly time.</p>
+<h2 id="directives">Directives</h2>
+<table>
+<thead>
+<tr>
+<th>Directive</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ORG addr</code></td>
+<td>Set the assembly origin. <code>addr</code> may be a symbol or expression.</td>
+</tr>
+<tr>
+<td><code>EQU value</code></td>
+<td>Define a constant (<code>NAME EQU value</code>).</td>
+</tr>
+<tr>
+<td><code>DB</code> / <code>DEFB</code></td>
+<td>Define bytes. Accepts numbers, expressions, and quoted strings.</td>
+</tr>
+<tr>
+<td><code>DW</code> / <code>DEFW</code></td>
+<td>Define 16-bit words, little-endian.</td>
+</tr>
+<tr>
+<td><code>DS</code> / <code>DEFS count[,fill]</code></td>
+<td>Reserve <code>count</code> bytes, filled with <code>fill</code> (default 0).</td>
+</tr>
+<tr>
+<td><code>INCLUDE "file"</code></td>
+<td>Textually include another source file.</td>
+</tr>
+<tr>
+<td><code>INCBIN "file"[,skip[,length]]</code></td>
+<td>Embed the raw bytes of a binary file.</td>
+</tr>
+<tr>
+<td><code>IF</code> / <code>IFDEF</code> / <code>IFNDEF</code> / <code>ELSE</code> / <code>ENDIF</code></td>
+<td>Conditional assembly.</td>
+</tr>
+<tr>
+<td><code>END</code></td>
+<td>Marks the end of the source (optional).</td>
+</tr>
+</tbody>
+</table>
+<p><code>DB</code> mixes strings and values freely:</p>
+<pre><code>message:        DB      &quot;SCORE: &quot;, 0
+row:            DB      WIDTH, HEIGHT, $FF
+</code></pre>
+<h2 id="conditional-assembly">Conditional assembly</h2>
+<p><code>IFDEF</code>/<code>IFNDEF</code> test whether a symbol is defined; <code>IF</code> tests whether an
+expression is non-zero:</p>
+<pre><code>                IFDEF   DEBUG
+                CALL    dump_state
+                ENDIF
+
+                IF      FEATURE_SOUND
+                CALL    init_sound
+                ENDIF
+</code></pre>
+<p><code>IF</code> evaluates an arithmetic expression (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, parentheses, and
+symbols) and treats any non-zero result as true; an undefined symbol counts as
+0. On top of that, <code>IF</code> conditions support the boolean operators <code>AND</code>, <code>OR</code>,
+<code>NOT</code> with short-circuit evaluation:</p>
+<pre><code>                IF      DEBUG AND NOT RELEASE
+                IF      TARGET_128 OR TARGET_PLUS3
+                IF      A AND (B OR C)
+</code></pre>
+<p>These boolean operators are recognised only inside <code>IF</code>; they are not part of
+ordinary operand or <code>DB</code> expressions. Symbols are pre-defined from the command
+line with <code>--define</code> or <code>--tag</code>.</p>
+<h2 id="build-tags">Build tags</h2>
+<p><code>--tag NAME</code> selects a build tag, the way Go build tags select variants. Each
+tag defines three things:</p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ZENAS_TAG_NAME</code></td>
+<td><code>1</code> — a presence flag, for <code>IFDEF</code> / <code>IF</code> / <code>AND</code> / <code>OR</code> / <code>NOT</code></td>
+</tr>
+<tr>
+<td><code>ZENAS_TAGBIT_NAME</code></td>
+<td><code>1 &lt;&lt; bit</code> — this tag's bit, assigned in command-line order</td>
+</tr>
+<tr>
+<td><code>ZENAS_TAGS</code></td>
+<td>the OR of every set tag's bit</td>
+</tr>
+</tbody>
+</table>
+<p><code>ZENAS_TAGS</code> is <strong>always defined</strong> (0 when no tags are given), so source that
+references it compiles in every configuration. Up to 16 distinct tags occupy
+bits. Tag names must be valid identifiers.</p>
+<pre><code>zenas assemble game.asm out.bin --tag debug --tag plus3
+</code></pre>
+<pre><code>                IFDEF   ZENAS_TAG_debug
+                DB      $DE, $AD            ; debug-only
+                ENDIF
+
+                IF      ZENAS_TAG_debug AND ZENAS_TAG_plus3
+                DB      $D3
+                ENDIF
+
+build_stamp:    DB      ZENAS_TAGS         ; embed the combined tag bitmask
+</code></pre>
+<p><code>--tag NAME</code> is equivalent to <code>--define ZENAS_TAG_NAME=1</code> plus the bit and mask
+symbols. Both <code>--tag NAME</code> and <code>--tag=NAME</code> are accepted, and multiple tags
+compose.</p>
+<h2 id="including-files">Including files</h2>
+<p><code>INCLUDE "file"</code> performs textual inclusion: the file's source replaces the
+directive in place, so labels defined in an included file are visible to the
+including file and vice versa, including forward references across the boundary.
+Paths are resolved relative to the file that contains the <code>INCLUDE</code>.</p>
+<p><code>INCBIN "file"[,skip[,length]]</code> embeds the raw bytes of a binary file at the
+current address:</p>
+<pre><code>sprite:         INCBIN  &quot;sprite.bin&quot;          ; the whole file
+tail:           INCBIN  &quot;sprite.bin&quot;,16        ; skip the first 16 bytes
+head:           INCBIN  &quot;sprite.bin&quot;,0,8       ; the first 8 bytes
+</code></pre>
+<p><code>skip</code> is an offset into the file; <code>length</code> limits how many bytes are inserted.
+Both are optional and may be expressions. An out-of-range <code>skip</code> or <code>length</code>, or
+a missing file, is an error. Paths resolve relative to the including file.</p>
+<h2 id="macros">Macros</h2>
+<p>Macros are enabled by selecting a style with <code>.MACRO_STYLE TRADITIONAL</code> (or
+<code>.MACRO_STYLE C</code>). The traditional style is the recommended one.</p>
+<p>A traditional macro is defined with <code>MACRO name(params)</code> ... <code>ENDMACRO</code> and
+called as <code>name(args)</code>:</p>
+<pre><code>.MACRO_STYLE TRADITIONAL
+
+MACRO LOAD16(reg, value)
+    LD reg, value
+ENDMACRO
+
+MACRO DELAY(count)
+    LD B, count
+loop:
+    DJNZ loop
+ENDMACRO
+
+        LOAD16(HL, $4000)
+        DELAY(20)
+        DELAY(50)
+</code></pre>
+<p>Each argument is substituted textually wherever its parameter name appears in
+the body. Macros may take zero, one, or several arguments, and a macro body may
+call other macros (including with multiple arguments), to any depth.</p>
+<p><strong>Parameter names may not be register or condition names.</strong> Because arguments are
+substituted textually, a parameter named <code>b</code> in a body line like <code>LD (HL), b</code>
+would assemble as the register <strong>B</strong>, not the argument — wrong code with no error.
+zenas therefore rejects, at definition time, any parameter whose name is a
+register (<code>A</code>, <code>B</code>, ... <code>L</code>, <code>I</code>, <code>R</code>, <code>IXH</code>/<code>IXL</code>/<code>IYH</code>/<code>IYL</code>, the pairs <code>BC</code>,
+<code>DE</code>, <code>HL</code>, <code>SP</code>, <code>AF</code>, <code>IX</code>, <code>IY</code>) or a condition code (<code>NZ</code>, <code>Z</code>, <code>NC</code>, <code>C</code>,
+<code>PO</code>, <code>PE</code>, <code>P</code>, <code>M</code>). Name parameters for what they hold — <code>val</code>, <code>mask</code>,
+<code>addr</code>, <code>count</code> — and the collision cannot arise.</p>
+<p><strong>A macro may not share a name with an instruction mnemonic unless it is in a
+package.</strong> A bare <code>add</code> is always the <code>ADD</code> instruction, so a macro named <code>add</code>
+with no package could never be reached. zenas rejects such a definition and
+directs you to place it in a package, where it is called qualified (<code>math.add</code>)
+and is unambiguous. (For C-style functions, the same applies, and a function,
+variable, or parameter may not be named after a register or condition either.)</p>
+<p><strong>Local labels</strong> defined inside a macro body (like <code>loop:</code> above) are made
+unique on every expansion, so a macro containing a loop can be called more than
+once without the labels colliding.</p>
+<p><strong>Width markers.</strong> A parameter may carry an optional width marker - <code>uint8_t</code> (or
+<code>uint8</code>, <code>byte</code>) for an 8-bit parameter, <code>uint16_t</code> (or <code>uint16</code>, <code>word</code>) for a
+16-bit one:</p>
+<pre><code>MACRO STORE(uint16_t addr, uint8_t value)
+    LD HL, addr
+    LD (HL), value
+ENDMACRO
+</code></pre>
+<p>The marker is a size-compatibility contract on the signature, not a typed
+variable: it records how wide the parameter is, not where it lives. When a
+parameter declares a width, the argument's width must match it exactly. Passing
+an argument of the wrong width is an error, in either direction - a wider
+argument would be silently truncated, a narrower one would not fill the width the
+signature promises:</p>
+<pre><code>        STORE($8000, 5)     ; ok: 16-bit and 8-bit arguments
+        STORE(5, 5)         ; error: 8-bit argument for a 16-bit parameter
+</code></pre>
+<p>Only arguments whose width is knowable are checked - literal numbers (a value up
+to 255 is 8-bit, larger is 16-bit). Symbols and expressions, whose width cannot
+be determined at assembly time, are trusted and not checked. A parameter with no
+marker is untyped and never width-checked. Width markers work the same way in
+both traditional and C-style macros.</p>
+<p><strong>Naming caveat.</strong> Because substitution is textual, a parameter named the same as
+a register or condition code is shadowed by it. <code>MACRO M(a)</code> with a body line
+<code>LD A, a</code> assembles as <code>LD A, A</code>, not <code>LD A, &lt;argument&gt;</code>. Avoid single-letter
+parameter names that clash with the registers <code>A B C D E H L</code> or the condition
+codes <code>Z C NC NZ P M PE PO</code>; use descriptive names such as <code>value</code>, <code>count</code>, or
+<code>reg</code>.</p>
+<p>A C-like style is also available via <code>.MACRO_STYLE C</code>, which transpiles C-shaped
+function definitions to traditional macros. It is structured-assembly sugar - a
+way to group <code>asm { ... }</code> blocks into named, callable units with simple
+parameter substitution - not a C compiler. It does not implement a calling
+convention (register or stack argument passing, return values). For compiling C
+to Z80, use z88dk.</p>
+<p>In C-style source, <code>;</code> is a statement terminator inside a <code>{ ... }</code> block (so a
+whole function may be written on one line), and a comment elsewhere - the file
+may still use <code>;</code> for header comments. The <code>//</code> form is also a comment. Width
+markers work the same as in traditional macros.</p>
+<p>A C-style function's return type is a width contract. A <code>return &lt;expr&gt;;</code> must
+return a value of the function's declared width, and it emits a <code>RET</code> (where the
+value lives is the primitive tier's concern, not zenas's):</p>
+<ul>
+<li>a <code>uint8_t</code> function must <code>return</code> an 8-bit value; a <code>uint16_t</code> function a
+  16-bit value; a width mismatch is an error;</li>
+<li>a <code>void</code> function must not return a value (<code>return &lt;expr&gt;;</code> is an error), and
+  may use a bare <code>return;</code>;</li>
+<li>a non-void function must return: a bare <code>return;</code>, or falling off the end with
+  no <code>return</code> at all, is an error, because the declared width would go
+  undelivered.</li>
+</ul>
+<h3 id="inline-vs-singleton-expansion">Inline vs singleton expansion</h3>
+<p>By default every instantiation of a macro emits a full copy of its body (inline
+expansion). For a body called many times this trades size for speed. The
+<code>.MACRO_MODE</code> directive selects the strategy:</p>
+<pre><code>.MACRO_MODE INLINE      ; the default: every call emits the full body
+.MACRO_MODE SINGLETON   ; emit the body once as a routine; every call is a CALL
+</code></pre>
+<p>In <code>SINGLETON</code> mode the body is emitted once, after the program code, as a
+labelled routine ending in <code>RET</code>, and each instantiation becomes a <code>CALL</code> to it.
+This is smaller whenever the body is larger than a <code>CALL</code> (3 bytes) and is called
+more than once, at the cost of the call/return overhead at run time.</p>
+<p>Parameters are passed through fixed memory slots, not registers or the stack.
+Each parameter gets one labelled slot (emitted once, beside the routine); a call
+writes its argument into the slot and then <code>CALL</code>s, and the body reads the
+parameter from the slot. So a body that uses <code>value</code> reads it as <code>(value)</code> — the
+parameter name denotes the slot's address:</p>
+<pre><code>.MACRO_MODE SINGLETON
+MACRO emit(uint8_t val)
+    LD A, (val)      ; read the argument from its slot
+    LD (HL), A
+    INC HL
+ENDMACRO
+</code></pre>
+<p>Because the slots are fixed locations, a parameterised singleton is <strong>not
+re-entrant</strong>: it must not call itself, directly or indirectly. zenas detects
+recursion among singleton macros and rejects it, pointing you to <code>INLINE</code> (or to
+an explicit subroutine that saves its context on the stack). Note too that a
+singleton reached from an interrupt that could fire mid-call would corrupt the
+slots; keep such routines <code>INLINE</code>.</p>
+<h2 id="packages">Packages</h2>
+<p>Macros may be grouped into packages, so that two libraries can each define a
+macro of the same name without clashing. A <code>.PACKAGE name</code> directive sets the
+package for the macros defined after it, until the next <code>.PACKAGE</code> or the end of
+the file:</p>
+<pre><code>.PACKAGE math
+MACRO add(uint8_t aa, uint8_t bb)
+    LD A, aa
+    ADD A, bb
+ENDMACRO
+
+.PACKAGE counter
+MACRO add(uint8_t nn)
+    LD A, nn
+    INC A
+ENDMACRO
+
+.PACKAGE main
+        math.add(10, 5)     ; the math package's add
+        counter.add(7)      ; the counter package's add
+</code></pre>
+<p>A call may be <strong>qualified</strong> with the package name (<code>math.add</code>) to select one
+exactly. An <strong>unqualified</strong> call (<code>add</code>) resolves only when a single package
+defines that name; if more than one does, it is an error and the call must be
+qualified:</p>
+<pre><code>        add(5)              ; error: ambiguous, defined in math and counter
+        math.add(5, 3)      ; fine
+</code></pre>
+<p>A real instruction is never shadowed by a macro of the same name: a bare <code>ADD</code>
+is always the <code>ADD</code> instruction, and a macro named <code>add</code> is reachable only as
+<code>package.add</code>. This lets a library use short, natural names without colliding
+with the instruction set.</p>
+<p>Macros defined with no <code>.PACKAGE</code> in effect belong to the default (unnamed)
+package and are called unqualified, as before. Affiliation is currently per file;
+the directive does not emit any code.</p>
+<h2 id="dialect-modes">Dialect modes</h2>
+<p>zenas can read a region of source in a different assembler's dialect, so legacy
+code - typically a pasmo include - can be assembled without converting it. A
+<code>.pasmo</code> directive switches into the pasmo dialect; <code>.zenas</code> switches back to
+zenas's native syntax. The switch is scoped and may be used repeatedly; the
+directives emit no code.</p>
+<pre><code>.pasmo
+        INCLUDE &quot;legacy.inc&quot;     ; assembled under pasmo rules
+.zenas
+        ; native zenas syntax resumes here
+</code></pre>
+<p>Because an include is spliced in as text before lexing, wrapping the include in
+<code>.pasmo</code> / <code>.zenas</code> is enough to assemble the included file under pasmo rules.</p>
+<p>In the pasmo dialect:</p>
+<ul>
+<li><code>$</code> is the location counter (the current address). A <code>$</code> followed by a hex
+  digit, e.g. <code>$8000</code>, is still a hex literal, so <code>ORG $8000</code> works as in pasmo.
+  In native zenas, <code>$</code> is always the hex prefix.</li>
+<li><code>DEFM "..."</code> is accepted as a string/byte directive (also accepted in native
+  mode as a convenience; it is equivalent to <code>DEFB</code> with a string).</li>
+<li>A label may be written without a colon, as in <code>loop    NOP</code>, at any
+  indentation. An identifier that is an instruction mnemonic, a directive, or a
+  known macro name is treated as such rather than as a label, matching pasmo.</li>
+<li><code>#</code> is a hexadecimal prefix (<code>#80</code> is <code>0x80</code>), in addition to <code>&amp;</code>, <code>0x</code>, and
+  the <code>h</code> suffix which work in both dialects.</li>
+<li><code>INCLUDE</code> accepts a bare unquoted filename (<code>INCLUDE if.asm</code>) as well as the
+  quoted form.</li>
+</ul>
+<p>Further pasmo conveniences (<code>name MACRO args</code> macro syntax, <code>PROC</code>/<code>LOCAL</code>
+scoping) are planned.</p>
+<p>For the full measured compatibility picture (which pasmo and sjasmplus
+constructs assemble, which do not, and what each one does), see
+<code>docs/DIALECT_COMPATIBILITY.md</code>. The instruction set, <code>ORG</code>, <code>EQU</code>,
+<code>DEFB</code>/<code>DEFW</code>, and conditionals are identical in both dialects and need no mode.</p>
+<h2 id="z80n-zx-spectrum-next">Z80N (ZX Spectrum Next)</h2>
+<p>The Z80N extended instructions are off by default. Enable them with <code>--next</code> (or
+<code>--cpu=Z80N</code>):</p>
+<pre><code>zenas assemble next-game.asm out.bin --next
+</code></pre>
+<p>The full set is supported - <code>SWAPNIB</code>, <code>MIRROR</code>, <code>TEST n</code>, the barrel-shift
+group (<code>BSLA</code>/<code>BSRA</code>/<code>BSRL</code>/<code>BSRF</code>/<code>BRLC DE,B</code>), <code>MUL</code>, <code>ADD rr,A</code>, <code>ADD rr,nn</code>,
+<code>PUSH nn</code>, <code>OUTINB</code>, <code>NEXTREG</code>, <code>PIXELDN</code>/<code>PIXELAD</code>/<code>SETAE</code>, <code>JP (C)</code>, and the
+DMA block-copy group (<code>LDIX</code>/<code>LDWS</code>/<code>LDDX</code>/<code>LDIRX</code>/<code>LDPIRX</code>/<code>LDDRX</code>). Output
+matches sjasmplus byte-for-byte. See <a href="z80n-reference.html">Z80N_REFERENCE.md</a> for
+the encodings.</p>
+<p>Without <code>--next</code>, a Z80N mnemonic is an error, so a stray <code>MUL</code> in plain Z80
+source is caught.</p>
+<h2 id="character-sets">Character sets</h2>
+<p><code>--charset=NAME</code> chooses how the bytes of string literals (in <code>DB</code> and character
+literals) are encoded. The default is <code>ascii</code>. The available sets are:</p>
+<p><code>ascii</code>, <code>spectrum-uk</code>, <code>spectrum-tk90x</code>, <code>spectrum-inves</code>, <code>spectrum-czech</code>,
+<code>spectrum-polish</code>, <code>msx-jp</code>, <code>msx-eu</code>, <code>cpc-uk</code>, <code>cpc-fr</code>.</p>
+<p>When a character is not present in the target set, zenas substitutes the closest
+available one (for example an accented letter to its base letter) and issues a
+warning. <code>--no-warnings</code> suppresses those warnings.</p>
+<h2 id="output-and-reports">Output and reports</h2>
+<p>By default <code>zenas assemble</code> writes a raw binary. A hex dump is shown for small
+outputs; <code>--hex</code> forces it and <code>--no-hex</code> suppresses it.</p>
+<p><code>--sym[=path]</code> writes a pasmo-format symbol file (<code>NAME EQU 0XXXXH</code>, one per
+line, sorted), suitable for memory-map tooling.</p>
+<p><code>--json=LEVEL</code> emits a JSON report instead of a binary:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>basic</code></td>
+<td>Machine code and symbols only</td>
+</tr>
+<tr>
+<td><code>standard</code></td>
+<td>Adds errors and assembly info</td>
+</tr>
+<tr>
+<td><code>detailed</code></td>
+<td>Adds an instruction breakdown</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td>Complete metadata with timing</td>
+</tr>
+</tbody>
+</table>
+<h2 id="running-and-testing-assembled-code">Running and testing assembled code</h2>
+<p>Unlike a plain cross-assembler, zenas can execute the code it just assembled,
+in-process, using the bundled Z80/Z80N emulator core - no separate emulator and
+no file round-trip. Two subcommands do this:</p>
+<ul>
+<li><code>zenas run &lt;file&gt;</code> assembles and executes, then reports the final CPU and
+  memory state.</li>
+<li><code>zenas assert &lt;file&gt; --expect ...</code> does the same, then checks the final state
+  against expectations and exits non-zero if any fail (suitable for CI).</li>
+</ul>
+<p>The program is loaded at its first <code>ORG</code> and execution starts there (or at a
+named routine with <code>--call</code>). Registers start zeroed for reproducibility.
+Execution stops at <code>HALT</code>, at a returning <code>--call</code> routine, or when the
+instruction cap (<code>--max-steps</code>, default 1,000,000) is reached - the cap is the
+infinite-loop guard.</p>
+<p>Common options (shared by both subcommands): <code>--max-steps=N</code>,
+<code>--call=&lt;label&gt;</code> (run a subroutine and stop when it returns),
+<code>--preload=ADDR,FILE</code> (load a binary into memory before running; repeatable),
+<code>--trace</code> (print each instruction as it executes), <code>--hex</code> / <code>--dump=START:LEN</code>
+(dump a memory region afterwards), <code>--json[=basic|standard|detailed|full]</code>, and
+<code>--next</code> (Z80N).</p>
+<p><code>assert</code> adds <code>--expect="..."</code>, a comma-separated list of checks over registers
+(<code>A</code>, <code>BC</code>, <code>HL</code>, <code>AF</code>, the shadow pairs <code>AF_</code>/<code>BC_</code>/<code>DE_</code>/<code>HL_</code>, <code>SP</code>, <code>PC</code>,
+...), flags (<code>CF</code> <code>ZF</code> <code>SF</code> <code>HF</code> <code>PF</code> <code>NF</code>, value 0 or 1), and memory bytes
+(<code>(0xC000)=0x42</code>, or by symbol, <code>(total)=0x42</code>). It prints <code>PASS</code>/<code>FAIL</code> per check.</p>
+<pre><code>zenas run game.asm --preload=0xC000,sprites.bin --trace
+zenas assert math.asm --call=multiply --expect=&quot;A=0x0C,CF=0&quot;
+</code></pre>
+<p>Test files named <code>*_test.asm</code> can include the program under test and define
+<code>test_*</code> routines each followed by an <code>.EXPECT</code> directive; <code>zenas assert
+file_test.asm</code> then discovers and runs them go-test style. <code>.EXPECT</code> is only
+allowed in <code>*_test.asm</code> files (an assembly error elsewhere), so test metadata
+cannot reach a production build.</p>
+<p>For a fuller walkthrough see <code>docs/RUNTIME.md</code>.</p>
+</article></div>
+<footer><div class="wrap foot-row">
+<span>haitch's Zen Spectrum Project v0.1.0 — Apache 2.0</span>
+<span><a href="mailto:h@ual.li">h@ual.li</a> · <a href="https://oldbytes.space/@haitchfive">@haitchfive</a></span>
+</div></footer>
+</body>
+</html>
